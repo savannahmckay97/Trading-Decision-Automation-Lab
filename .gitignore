@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+.venv/
+venv/
+
+# Runtime state and generated research outputs are never source-controlled.
+data/
+results/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Credentials and local configuration.
+.env
+.env.*
+!.env.example

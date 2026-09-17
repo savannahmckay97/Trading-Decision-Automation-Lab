@@ -1,0 +1,437 @@
+catalog:
+  name: market_decision_rule_catalog
+  version: 0.1.0
+  doctrine_version: 0.1
+  generated_at: "2026-09-17T03:30:00Z"
+  purpose: >-
+    Machine-readable foundation for deterministic market observation, safety
+    gates, and BREAKOUT_RETEST_V1. No rule in this version may place a live order.
+  default_mode: observation_only
+  allowed_outputs:
+    - WATCH_LONG
+    - WATCH_SHORT
+    - LONG_ELIGIBLE
+    - SHORT_ELIGIBLE
+    - NO_TRADE
+    - DATA_STALE
+    - RISK_BLOCKED
+  independence_groups:
+    - price
+    - volatility
+    - volume
+    - order_flow
+    - derivatives
+    - positioning
+    - liquidity
+    - venue_confirmation
+    - event_risk
+    - account_risk
+    - data_quality
+
+rule_defaults:
+  enabled: true
+  status: draft
+  action_scope: observe_or_veto
+  evaluation_timing: on_completed_15m_candle
+  missing_input_policy: block
+  error_policy: block
+  live_execution_allowed: false
+
+rules:
+  - rule_id: T0_INVALIDATION_REQUIRED
+    version: 1
+    tier: 0
+    purpose: Prohibit any eligible trade that lacks an explicit invalidation.
+    horizon: trade_lifetime
+    inputs: [decision.proposed_side, decision.invalidation_price]
+    condition: "proposed_side != NONE and invalidation_price is null"
+    action: RISK_BLOCKED
+    severity: critical
+    independence_group: account_risk
+    failure_modes: [invalid_numeric_value, side_not_normalized]
+
+  - rule_id: T0_ACCOUNT_RISK_REQUIRED
+    version: 1
+    tier: 0
+    purpose: Require quantity to be derived from allowed loss and stop distance.
+    horizon: trade_lifetime
+    inputs:
+      - account.equity_usd
+      - config.max_risk_fraction
+      - decision.entry_price
+      - decision.invalidation_price
+      - execution.round_trip_cost_bps
+    calculation: >-
+      risk_budget_usd = equity_usd * max_risk_fraction;
+      unit_risk_usd = abs(entry_price - invalidation_price) + estimated_unit_cost;
+      maximum_quantity = risk_budget_usd / unit_risk_usd
+    condition: "maximum_quantity <= 0 or requested_quantity > maximum_quantity"
+    action: RISK_BLOCKED
+    severity: critical
+    independence_group: account_risk
+    failure_modes: [gap_beyond_stop, incorrect_fee_model, stale_equity]
+
+  - rule_id: T0_NO_DIRECTIONAL_FLIP
+    version: 1
+    tier: 0
+    purpose: Prevent closing one side from being treated as evidence for the opposite side.
+    horizon: 30m
+    inputs: [journal.last_exit_time, journal.last_exit_side, decision.proposed_side, setup.setup_id]
+    condition: >-
+      proposed_side is opposite(last_exit_side) and minutes_since(last_exit_time) < 30
+      and setup_id is null
+    action: RISK_BLOCKED
+    severity: high
+    independence_group: account_risk
+    failure_modes: [missing_journal_state]
+
+  - rule_id: T0_DATA_FRESHNESS
+    version: 1
+    tier: 0
+    purpose: Block decisions when any required input exceeds its freshness contract.
+    horizon: instantaneous
+    inputs: [quality.required_fields_fresh]
+    condition: "required_fields_fresh == false"
+    action: DATA_STALE
+    severity: critical
+    independence_group: data_quality
+    failure_modes: [clock_drift, delayed_feed, silent_disconnect]
+
+  - rule_id: T0_VENUE_CONFIRMATION
+    version: 1
+    tier: 0
+    purpose: Confirm executable Kraken price before a Kraken-oriented decision.
+    horizon: instantaneous
+    inputs:
+      - market.binance.last_price
+      - market.kraken.last_price
+      - market.kraken.bid_price
+      - market.kraken.ask_price
+      - config.max_cross_venue_divergence_bps
+    calculation: >-
+      divergence_bps = 10000 * abs(kraken_last_price - binance_last_price)
+      / midpoint(kraken_last_price, binance_last_price)
+    condition: >-
+      kraken_last_price is null or divergence_bps > max_cross_venue_divergence_bps
+    action: RISK_BLOCKED
+    severity: critical
+    independence_group: venue_confirmation
+    failure_modes: [symbol_mismatch, quote_currency_mismatch, stale_venue]
+
+  - rule_id: T0_SPREAD_BUDGET
+    version: 1
+    tier: 0
+    purpose: Reject entries whose executable spread consumes the cost budget.
+    horizon: instantaneous
+    inputs: [market.kraken.bid_price, market.kraken.ask_price, config.max_spread_bps]
+    calculation: "spread_bps = 10000 * (ask_price - bid_price) / midpoint(bid_price, ask_price)"
+    condition: "spread_bps > max_spread_bps"
+    action: RISK_BLOCKED
+    severity: high
+    independence_group: liquidity
+    failure_modes: [hidden_slippage, thin_depth_beyond_best_quote]
+
+  - rule_id: T0_EVENT_BLACKOUT
+    version: 1
+    tier: 0
+    purpose: Block untested exposure near scheduled high-impact events.
+    horizon: configured_event_window
+    inputs: [event.next_high_impact_time, event.strategy_event_tested, config.event_blackout_minutes]
+    condition: >-
+      abs(minutes_until(next_high_impact_time)) <= event_blackout_minutes
+      and strategy_event_tested == false
+    action: RISK_BLOCKED
+    severity: high
+    independence_group: event_risk
+    failure_modes: [missing_calendar_event, incorrectly_classified_event]
+
+  - rule_id: T0_PORTFOLIO_HEAT
+    version: 1
+    tier: 0
+    purpose: Cap total open risk including correlated positions.
+    horizon: portfolio
+    inputs: [account.open_risk_usd, decision.proposed_risk_usd, account.equity_usd, config.max_portfolio_heat_fraction]
+    condition: >-
+      open_risk_usd + proposed_risk_usd > equity_usd * max_portfolio_heat_fraction
+    action: RISK_BLOCKED
+    severity: critical
+    independence_group: account_risk
+    failure_modes: [correlation_underestimate, missing_conditional_order]
+
+  - rule_id: T0_DAILY_CIRCUIT_BREAKER
+    version: 1
+    tier: 0
+    purpose: Disable new risk after the daily loss or consecutive-loss limit.
+    horizon: trading_day
+    inputs:
+      - account.daily_realized_pnl_usd
+      - account.equity_start_of_day_usd
+      - journal.consecutive_losses
+      - config.max_daily_loss_fraction
+      - config.max_consecutive_losses
+    condition: >-
+      daily_realized_pnl_usd <= -equity_start_of_day_usd * max_daily_loss_fraction
+      or consecutive_losses >= max_consecutive_losses
+    action: RISK_BLOCKED
+    severity: critical
+    independence_group: account_risk
+    failure_modes: [timezone_rollover_error, missing_manual_trades]
+
+  - rule_id: T0_OBSERVATION_ONLY
+    version: 1
+    tier: 0
+    purpose: Ensure v0.1 cannot submit live orders.
+    horizon: system_lifetime
+    inputs: [system.mode]
+    condition: "mode != observation_only and mode != historical_replay and mode != paper"
+    action: RISK_BLOCKED
+    severity: critical
+    independence_group: account_risk
+    failure_modes: [configuration_tampering]
+
+  - rule_id: T1_COMPLETED_CANDLE
+    version: 1
+    tier: 1
+    purpose: Identify the most recent fully closed 15-minute candle.
+    horizon: 15m
+    inputs: [candle.binance_15m.open_time, candle.binance_15m.close_time, clock.exchange_time]
+    calculation: "completed = close_time < exchange_time"
+    condition: "completed == true"
+    action: annotate
+    output_field: feature.completed_15m
+    independence_group: data_quality
+    failure_modes: [local_clock_used_instead_of_exchange_clock]
+
+  - rule_id: T1_LOCAL_LEVELS
+    version: 1
+    tier: 1
+    purpose: Generate causal rolling resistance and support without future information.
+    horizon: 15m
+    inputs: [series.binance_15m.high, series.binance_15m.low, config.level_lookback_candles]
+    calculation: >-
+      resistance = max(high[-level_lookback_candles:-1]);
+      support = min(low[-level_lookback_candles:-1])
+    condition: always
+    action: annotate
+    output_fields: [feature.resistance, feature.support]
+    independence_group: price
+    failure_modes: [insufficient_history, future_candle_in_window]
+
+  - rule_id: T1_ATR
+    version: 1
+    tier: 1
+    purpose: Normalize buffers, stops, and movement by current volatility.
+    horizon: 15m
+    inputs: [series.binance_15m.high, series.binance_15m.low, series.binance_15m.close, config.atr_period]
+    calculation: "atr = wilder_atr(high, low, close, atr_period)"
+    condition: always
+    action: annotate
+    output_field: feature.atr_15m
+    independence_group: volatility
+    failure_modes: [warmup_shortfall, adjusted_formula_mismatch]
+
+  - rule_id: T1_VOLUME_PERCENTILE
+    version: 1
+    tier: 1
+    purpose: Compare current volume with recent completed candles.
+    horizon: 15m
+    inputs: [series.binance_15m.volume, config.volume_lookback_candles]
+    calculation: "volume_percentile = percentile_rank(volume[-1], volume[-lookback:-1])"
+    condition: always
+    action: annotate
+    output_field: feature.volume_percentile
+    independence_group: volume
+    failure_modes: [time_of_day_seasonality, incomplete_candle]
+
+  - rule_id: T1_OI_CHANGE
+    version: 1
+    tier: 1
+    purpose: Measure fresh derivatives positioning over fixed windows.
+    horizon: [15m, 60m]
+    inputs: [series.binance_open_interest.value, series.binance_open_interest.timestamp]
+    calculation: "oi_change_pct_h = 100 * (oi_now / oi_h_ago - 1)"
+    condition: always
+    action: annotate
+    output_fields: [feature.oi_change_15m_pct, feature.oi_change_60m_pct]
+    independence_group: derivatives
+    failure_modes: [contract_reset, missing_interval, unit_change]
+
+  - rule_id: T1_TAKER_FLOW
+    version: 1
+    tier: 1
+    purpose: Quantify aggressive buy and sell flow.
+    horizon: [5m, 15m, 60m]
+    inputs: [series.binance_taker.buy_volume, series.binance_taker.sell_volume]
+    calculation: >-
+      taker_ratio = buy_volume / max(sell_volume, epsilon);
+      buy_share = buy_volume / max(buy_volume + sell_volume, epsilon)
+    condition: always
+    action: annotate
+    output_fields: [feature.taker_ratio, feature.taker_buy_share]
+    independence_group: order_flow
+    failure_modes: [endpoint_side_semantics_reversed, zero_volume]
+
+  - rule_id: T1_FUNDING_CROWDING
+    version: 1
+    tier: 1
+    purpose: Describe funding direction and extremity without treating it as a standalone reversal signal.
+    horizon: funding_interval
+    inputs: [series.binance_funding.rate, series.binance_funding.timestamp, config.funding_history_points]
+    calculation: >-
+      funding_percentile = percentile_rank(rate[-1], rate[-funding_history_points:-1])
+    condition: always
+    action: annotate
+    output_fields: [feature.funding_rate, feature.funding_percentile]
+    independence_group: derivatives
+    failure_modes: [changed_funding_interval, funding_cap_change]
+
+  - rule_id: T1_POSITIONING
+    version: 1
+    tier: 1
+    purpose: Preserve the distinction between account ratios and position-size ratios.
+    horizon: 15m
+    inputs:
+      - series.binance_positioning.global_long_account
+      - series.binance_positioning.top_long_account
+      - series.binance_positioning.top_long_position
+    calculation: "copy_latest_values_without_merging_denominators"
+    condition: always
+    action: annotate
+    output_fields:
+      - feature.global_long_account_share
+      - feature.top_long_account_share
+      - feature.top_long_position_share
+    independence_group: positioning
+    failure_modes: [account_ratio_mislabeled_as_position_ratio]
+
+  - rule_id: T2_PRICE_OI_QUADRANT
+    version: 1
+    tier: 2
+    purpose: Classify the joint direction of price and open interest.
+    horizon: 15m
+    inputs: [feature.return_15m_pct, feature.oi_change_15m_pct, config.minimum_material_change_pct]
+    calculation: >-
+      quadrant = classify_sign(return_15m_pct, oi_change_15m_pct,
+      minimum_material_change_pct)
+    condition: always
+    action: annotate
+    output_field: feature.price_oi_quadrant
+    output_values: [PRICE_UP_OI_UP, PRICE_UP_OI_DOWN, PRICE_DOWN_OI_UP, PRICE_DOWN_OI_DOWN, IMMATERIAL]
+    independence_group: derivatives
+    failure_modes: [threshold_too_small, time_window_misalignment]
+
+  - rule_id: T2_BREAKOUT_QUALITY
+    version: 1
+    tier: 2
+    purpose: Score breakout participation using independent evidence groups.
+    horizon: 15m
+    inputs:
+      - feature.volume_percentile
+      - feature.oi_change_15m_pct
+      - feature.taker_buy_share
+      - feature.spread_bps
+      - quality.required_fields_fresh
+    calculation: >-
+      score = volume_component + oi_component + taker_component
+      - spread_penalty - stale_penalty
+    condition: always
+    action: score
+    output_field: score.breakout_quality
+    score_range: [-5, 5]
+    independence_group: order_flow
+    failure_modes: [double_counting_correlated_inputs, uncalibrated_thresholds]
+
+  - rule_id: SETUP_BREAKOUT_RETEST_V1
+    version: 1
+    tier: 3
+    purpose: Identify a causal breakout, wait for retest, and emit eligibility without placing an order.
+    horizon: 15m_to_90m
+    state_machine:
+      initial: IDLE
+      states: [IDLE, BREAKOUT_OBSERVED, RETEST_PENDING, LONG_ELIGIBLE, FAILED, EXPIRED]
+      transitions:
+        - from: IDLE
+          to: BREAKOUT_OBSERVED
+          when: >-
+            completed_close > resistance + breakout_buffer_atr * atr_15m
+            and breakout_quality >= minimum_breakout_quality
+        - from: BREAKOUT_OBSERVED
+          to: RETEST_PENDING
+          when: "bars_since_breakout >= 1"
+        - from: RETEST_PENDING
+          to: LONG_ELIGIBLE
+          when: >-
+            low <= resistance + retest_tolerance_atr * atr_15m
+            and completed_close >= resistance
+            and taker_buy_share >= minimum_retest_buy_share
+        - from: BREAKOUT_OBSERVED
+          to: FAILED
+          when: "completed_close < resistance - failure_buffer_atr * atr_15m"
+        - from: RETEST_PENDING
+          to: FAILED
+          when: "completed_close < resistance - failure_buffer_atr * atr_15m"
+        - from: BREAKOUT_OBSERVED
+          to: EXPIRED
+          when: "bars_since_breakout > expiry_bars"
+        - from: RETEST_PENDING
+          to: EXPIRED
+          when: "bars_since_breakout > expiry_bars"
+    inputs:
+      - feature.completed_15m
+      - feature.resistance
+      - feature.atr_15m
+      - feature.taker_buy_share
+      - score.breakout_quality
+      - market.kraken.last_price
+      - quality.required_fields_fresh
+    parameters:
+      breakout_buffer_atr: 0.10
+      retest_tolerance_atr: 0.20
+      failure_buffer_atr: 0.15
+      minimum_breakout_quality: 1
+      minimum_retest_buy_share: 0.50
+      expiry_bars: 6
+    condition: state_machine
+    action: emit_state
+    outputs: [WATCH_LONG, LONG_ELIGIBLE, NO_TRADE, DATA_STALE, RISK_BLOCKED]
+    invalidation: "completed_close < resistance - failure_buffer_atr * atr_15m"
+    independence_group: price
+    failure_modes:
+      - resistance_selected_with_hindsight
+      - breakout_during_event_blackout
+      - retest_wick_without_acceptance
+      - squeeze_mistaken_for_durable_demand
+      - kraken_price_not_confirmed
+    test_status: specification_complete
+
+conflict_resolution:
+  precedence:
+    - DATA_STALE
+    - RISK_BLOCKED
+    - NO_TRADE
+    - SHORT_ELIGIBLE
+    - LONG_ELIGIBLE
+    - WATCH_SHORT
+    - WATCH_LONG
+  policies:
+    - policy_id: veto_overrides_score
+      rule: "Any Tier 0 block overrides all setup scores."
+    - policy_id: opposite_setups_abstain
+      rule: "Simultaneous long and short eligibility resolves to NO_TRADE."
+    - policy_id: missing_is_not_neutral
+      rule: "A missing required input may not be imputed as zero or neutral."
+
+configuration_defaults:
+  max_risk_fraction: 0.0025
+  max_portfolio_heat_fraction: 0.01
+  max_daily_loss_fraction: 0.01
+  max_consecutive_losses: 3
+  max_cross_venue_divergence_bps: 35
+  max_spread_bps: 15
+  event_blackout_minutes: 30
+  level_lookback_candles: 32
+  atr_period: 14
+  volume_lookback_candles: 96
+  funding_history_points: 90
+  minimum_material_change_pct: 0.02
+

@@ -1,0 +1,13 @@
+services:
+  observer:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - trading_decision_data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  trading_decision_data:

@@ -1,0 +1,480 @@
+dictionary:
+  name: market_observer_data_dictionary
+  version: 0.1.0
+  generated_at: "2026-09-17T03:30:00Z"
+  canonical_timezone: UTC
+  timestamp_unit: milliseconds_since_unix_epoch
+  numeric_policy: decimal_for_money_and_quantity
+  null_policy: preserve_null_and_raise_quality_flag
+  raw_data_policy: append_only
+  symbols:
+    research_symbol: TAOUSDT
+    executable_symbol: TAO/USD
+    research_venue: binance_usds_m_futures
+    executable_venue: kraken_spot_margin
+
+sources:
+  binance_public:
+    authentication: none
+    role: research_context
+    transport: [REST, WebSocket]
+    required_capabilities:
+      - klines_15m
+      - aggregate_trades
+      - book_ticker
+      - diff_depth
+      - open_interest
+      - open_interest_history
+      - funding_history
+      - global_long_short_accounts
+      - top_trader_accounts
+      - top_trader_positions
+      - taker_buy_sell_volume
+  kraken_public:
+    authentication: none
+    role: executable_price_confirmation
+    transport: [REST, WebSocket]
+    required_capabilities: [ticker, trades, book, ohlc]
+  kraken_private_read_only:
+    authentication: api_key_read_only
+    role: account_and_execution_truth
+    permissions: [query_funds, query_open_orders, query_closed_orders, query_trades, query_positions]
+    forbidden_permissions: [withdraw, deposit_address_management, api_key_management]
+    required_for_observation_v0_1: false
+  official_event_sources:
+    authentication: none_or_provider_specific
+    role: scheduled_event_ground_truth
+    required_for_observation_v0_1: false
+
+fields:
+  system.mode:
+    type: enum
+    values: [historical_replay, observation_only, paper, shadow, guarded_live]
+    source: local_configuration
+    unit: none
+    freshness_ms: null
+    required_by: [T0_OBSERVATION_ONLY]
+
+  clock.exchange_time:
+    type: timestamp
+    source: venue_server_time
+    unit: ms
+    freshness_ms: 5000
+    required_by: [T1_COMPLETED_CANDLE]
+
+  market.binance.last_price:
+    type: decimal
+    source: binance_public
+    unit: USDT_per_TAO
+    frequency: tick
+    freshness_ms: 5000
+    constraints: {exclusive_minimum: 0}
+    required_by: [T0_VENUE_CONFIRMATION]
+
+  market.kraken.last_price:
+    type: decimal
+    source: kraken_public
+    unit: USD_per_TAO
+    frequency: tick
+    freshness_ms: 5000
+    constraints: {exclusive_minimum: 0}
+    required_by: [T0_VENUE_CONFIRMATION, SETUP_BREAKOUT_RETEST_V1]
+
+  market.kraken.bid_price:
+    type: decimal
+    source: kraken_public
+    unit: USD_per_TAO
+    frequency: tick
+    freshness_ms: 5000
+    constraints: {exclusive_minimum: 0}
+    required_by: [T0_VENUE_CONFIRMATION, T0_SPREAD_BUDGET]
+
+  market.kraken.ask_price:
+    type: decimal
+    source: kraken_public
+    unit: USD_per_TAO
+    frequency: tick
+    freshness_ms: 5000
+    constraints: {exclusive_minimum: 0, relation: ask_price_gte_bid_price}
+    required_by: [T0_VENUE_CONFIRMATION, T0_SPREAD_BUDGET]
+
+  candle.binance_15m.open_time:
+    type: timestamp
+    source: binance_public
+    endpoint_family: klines_15m
+    unit: ms
+    frequency: 15m
+    freshness_ms: 960000
+    required_by: [T1_COMPLETED_CANDLE]
+
+  candle.binance_15m.close_time:
+    type: timestamp
+    source: binance_public
+    endpoint_family: klines_15m
+    unit: ms
+    frequency: 15m
+    freshness_ms: 960000
+    required_by: [T1_COMPLETED_CANDLE]
+
+  series.binance_15m.high:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: klines_15m
+    unit: USDT_per_TAO
+    minimum_points: 110
+    freshness_ms: 960000
+    required_by: [T1_LOCAL_LEVELS, T1_ATR]
+
+  series.binance_15m.low:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: klines_15m
+    unit: USDT_per_TAO
+    minimum_points: 110
+    freshness_ms: 960000
+    required_by: [T1_LOCAL_LEVELS, T1_ATR]
+
+  series.binance_15m.close:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: klines_15m
+    unit: USDT_per_TAO
+    minimum_points: 110
+    freshness_ms: 960000
+    required_by: [T1_ATR]
+
+  series.binance_15m.volume:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: klines_15m
+    unit: TAO
+    minimum_points: 110
+    freshness_ms: 960000
+    required_by: [T1_VOLUME_PERCENTILE]
+
+  series.binance_open_interest.value:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: open_interest_history
+    unit: TAO_contract_equivalent
+    minimum_points: 13
+    freshness_ms: 360000
+    required_by: [T1_OI_CHANGE]
+
+  series.binance_open_interest.timestamp:
+    type: array_timestamp
+    source: binance_public
+    endpoint_family: open_interest_history
+    unit: ms
+    minimum_points: 13
+    freshness_ms: 360000
+    required_by: [T1_OI_CHANGE]
+
+  series.binance_taker.buy_volume:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: taker_buy_sell_volume
+    unit: TAO
+    minimum_points: 13
+    freshness_ms: 360000
+    required_by: [T1_TAKER_FLOW]
+
+  series.binance_taker.sell_volume:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: taker_buy_sell_volume
+    unit: TAO
+    minimum_points: 13
+    freshness_ms: 360000
+    required_by: [T1_TAKER_FLOW]
+
+  series.binance_funding.rate:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: funding_history
+    unit: fraction_per_funding_interval
+    minimum_points: 90
+    freshness_ms: 32400000
+    required_by: [T1_FUNDING_CROWDING]
+
+  series.binance_funding.timestamp:
+    type: array_timestamp
+    source: binance_public
+    endpoint_family: funding_history
+    unit: ms
+    minimum_points: 90
+    freshness_ms: 32400000
+    required_by: [T1_FUNDING_CROWDING]
+
+  series.binance_positioning.global_long_account:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: global_long_short_accounts
+    unit: fraction
+    range: [0, 1]
+    minimum_points: 2
+    freshness_ms: 360000
+    required_by: [T1_POSITIONING]
+
+  series.binance_positioning.top_long_account:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: top_trader_accounts
+    unit: fraction
+    range: [0, 1]
+    minimum_points: 2
+    freshness_ms: 360000
+    required_by: [T1_POSITIONING]
+
+  series.binance_positioning.top_long_position:
+    type: array_decimal
+    source: binance_public
+    endpoint_family: top_trader_positions
+    unit: fraction
+    range: [0, 1]
+    minimum_points: 2
+    freshness_ms: 360000
+    required_by: [T1_POSITIONING]
+
+  account.equity_usd:
+    type: decimal
+    source: kraken_private_read_only
+    unit: USD
+    freshness_ms: 15000
+    constraints: {minimum: 0}
+    required_by: [T0_ACCOUNT_RISK_REQUIRED, T0_PORTFOLIO_HEAT]
+
+  account.equity_start_of_day_usd:
+    type: decimal
+    source: local_ledger
+    unit: USD
+    freshness_ms: 86400000
+    constraints: {exclusive_minimum: 0}
+    required_by: [T0_DAILY_CIRCUIT_BREAKER]
+
+  account.open_risk_usd:
+    type: decimal
+    source: local_risk_engine
+    unit: USD
+    freshness_ms: 5000
+    constraints: {minimum: 0}
+    required_by: [T0_PORTFOLIO_HEAT]
+
+  account.daily_realized_pnl_usd:
+    type: decimal
+    source: local_ledger
+    unit: USD
+    freshness_ms: 15000
+    required_by: [T0_DAILY_CIRCUIT_BREAKER]
+
+  journal.consecutive_losses:
+    type: integer
+    source: local_journal
+    unit: count
+    freshness_ms: 15000
+    constraints: {minimum: 0}
+    required_by: [T0_DAILY_CIRCUIT_BREAKER]
+
+  event.next_high_impact_time:
+    type: nullable_timestamp
+    source: official_event_sources
+    unit: ms
+    freshness_ms: 3600000
+    required_by: [T0_EVENT_BLACKOUT]
+
+  event.strategy_event_tested:
+    type: boolean
+    source: local_configuration
+    unit: none
+    freshness_ms: null
+    required_by: [T0_EVENT_BLACKOUT]
+
+  quality.required_fields_fresh:
+    type: boolean
+    source: local_quality_engine
+    unit: none
+    freshness_ms: 1000
+    required_by: [T0_DATA_FRESHNESS, T2_BREAKOUT_QUALITY, SETUP_BREAKOUT_RETEST_V1]
+
+  decision.proposed_side:
+    type: enum
+    values: [NONE, LONG, SHORT]
+    source: local_rule_engine
+    unit: none
+    freshness_ms: 1000
+    required_by: [T0_INVALIDATION_REQUIRED, T0_NO_DIRECTIONAL_FLIP]
+
+  decision.entry_price:
+    type: nullable_decimal
+    source: local_rule_engine
+    unit: USD_per_TAO
+    freshness_ms: 1000
+    required_by: [T0_ACCOUNT_RISK_REQUIRED]
+
+  decision.invalidation_price:
+    type: nullable_decimal
+    source: local_rule_engine
+    unit: USD_per_TAO
+    freshness_ms: 1000
+    required_by: [T0_INVALIDATION_REQUIRED, T0_ACCOUNT_RISK_REQUIRED]
+
+  decision.proposed_risk_usd:
+    type: decimal
+    source: local_risk_engine
+    unit: USD
+    freshness_ms: 1000
+    constraints: {minimum: 0}
+    required_by: [T0_PORTFOLIO_HEAT]
+
+  execution.round_trip_cost_bps:
+    type: decimal
+    source: local_cost_model
+    unit: basis_points
+    freshness_ms: 3600000
+    constraints: {minimum: 0}
+    required_by: [T0_ACCOUNT_RISK_REQUIRED]
+
+  journal.last_exit_time:
+    type: nullable_timestamp
+    source: local_journal
+    unit: ms
+    freshness_ms: null
+    required_by: [T0_NO_DIRECTIONAL_FLIP]
+
+  journal.last_exit_side:
+    type: nullable_enum
+    values: [LONG, SHORT]
+    source: local_journal
+    unit: none
+    freshness_ms: null
+    required_by: [T0_NO_DIRECTIONAL_FLIP]
+
+  setup.setup_id:
+    type: nullable_string
+    source: local_rule_engine
+    unit: none
+    freshness_ms: 1000
+    required_by: [T0_NO_DIRECTIONAL_FLIP]
+
+  config.max_risk_fraction:
+    type: decimal
+    source: rule_catalog.configuration_defaults
+    unit: fraction_of_equity
+    freshness_ms: null
+    range: [0, 0.01]
+    required_by: [T0_ACCOUNT_RISK_REQUIRED]
+
+  config.max_portfolio_heat_fraction:
+    type: decimal
+    source: rule_catalog.configuration_defaults
+    unit: fraction_of_equity
+    freshness_ms: null
+    range: [0, 0.05]
+    required_by: [T0_PORTFOLIO_HEAT]
+
+  config.max_daily_loss_fraction:
+    type: decimal
+    source: rule_catalog.configuration_defaults
+    unit: fraction_of_starting_equity
+    freshness_ms: null
+    range: [0, 0.05]
+    required_by: [T0_DAILY_CIRCUIT_BREAKER]
+
+  config.max_consecutive_losses:
+    type: integer
+    source: rule_catalog.configuration_defaults
+    unit: count
+    freshness_ms: null
+    constraints: {minimum: 1, maximum: 10}
+    required_by: [T0_DAILY_CIRCUIT_BREAKER]
+
+  config.max_cross_venue_divergence_bps:
+    type: decimal
+    source: rule_catalog.configuration_defaults
+    unit: basis_points
+    freshness_ms: null
+    required_by: [T0_VENUE_CONFIRMATION]
+
+  config.max_spread_bps:
+    type: decimal
+    source: rule_catalog.configuration_defaults
+    unit: basis_points
+    freshness_ms: null
+    required_by: [T0_SPREAD_BUDGET]
+
+  config.event_blackout_minutes:
+    type: integer
+    source: rule_catalog.configuration_defaults
+    unit: minutes
+    freshness_ms: null
+    required_by: [T0_EVENT_BLACKOUT]
+
+  config.level_lookback_candles:
+    type: integer
+    source: rule_catalog.configuration_defaults
+    unit: candles
+    freshness_ms: null
+    required_by: [T1_LOCAL_LEVELS]
+
+  config.atr_period:
+    type: integer
+    source: rule_catalog.configuration_defaults
+    unit: candles
+    freshness_ms: null
+    required_by: [T1_ATR]
+
+  config.volume_lookback_candles:
+    type: integer
+    source: rule_catalog.configuration_defaults
+    unit: candles
+    freshness_ms: null
+    required_by: [T1_VOLUME_PERCENTILE]
+
+  config.funding_history_points:
+    type: integer
+    source: rule_catalog.configuration_defaults
+    unit: funding_intervals
+    freshness_ms: null
+    required_by: [T1_FUNDING_CROWDING]
+
+  config.minimum_material_change_pct:
+    type: decimal
+    source: rule_catalog.configuration_defaults
+    unit: percent
+    freshness_ms: null
+    required_by: [T2_PRICE_OI_QUADRANT]
+
+derived_fields:
+  feature.completed_15m: {type: boolean, producer: T1_COMPLETED_CANDLE}
+  feature.resistance: {type: decimal, unit: USDT_per_TAO, producer: T1_LOCAL_LEVELS}
+  feature.support: {type: decimal, unit: USDT_per_TAO, producer: T1_LOCAL_LEVELS}
+  feature.atr_15m: {type: decimal, unit: USDT_per_TAO, producer: T1_ATR}
+  feature.volume_percentile: {type: decimal, range: [0, 1], producer: T1_VOLUME_PERCENTILE}
+  feature.oi_change_15m_pct: {type: decimal, unit: percent, producer: T1_OI_CHANGE}
+  feature.oi_change_60m_pct: {type: decimal, unit: percent, producer: T1_OI_CHANGE}
+  feature.taker_ratio: {type: decimal, producer: T1_TAKER_FLOW}
+  feature.taker_buy_share: {type: decimal, range: [0, 1], producer: T1_TAKER_FLOW}
+  feature.funding_rate: {type: decimal, producer: T1_FUNDING_CROWDING}
+  feature.funding_percentile: {type: decimal, range: [0, 1], producer: T1_FUNDING_CROWDING}
+  feature.global_long_account_share: {type: decimal, range: [0, 1], producer: T1_POSITIONING}
+  feature.top_long_account_share: {type: decimal, range: [0, 1], producer: T1_POSITIONING}
+  feature.top_long_position_share: {type: decimal, range: [0, 1], producer: T1_POSITIONING}
+  feature.return_15m_pct: {type: decimal, unit: percent, producer: feature_engine}
+  feature.spread_bps: {type: decimal, unit: basis_points, producer: feature_engine}
+  feature.price_oi_quadrant: {type: enum, producer: T2_PRICE_OI_QUADRANT}
+  score.breakout_quality: {type: integer, range: [-5, 5], producer: T2_BREAKOUT_QUALITY}
+
+quality_contracts:
+  - contract_id: synchronized_15m
+    requirement: >-
+      Candle return, OI change, taker flow, and positioning used in one decision
+      must reference the same completed interval or an explicitly documented as-of join.
+  - contract_id: no_silent_forward_fill
+    requirement: Missing derivatives or venue values may not be silently forward-filled.
+  - contract_id: raw_provenance
+    requirement: Every normalized record preserves source, endpoint, symbol, event time, receive time, and raw-record identifier.
+  - contract_id: book_sequence
+    requirement: Diff-depth updates are unusable after a sequence gap until a fresh snapshot and replay restore continuity.
+  - contract_id: quote_currency
+    requirement: USD and USDT values remain labeled; parity may be measured but never assumed silently.
+
