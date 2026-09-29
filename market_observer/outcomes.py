@@ -7,10 +7,14 @@ performance, and must never be fed back into the decision evaluator.
 
 from __future__ import annotations
 
+import argparse
+import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
+from .dataset import build_dataset_artifact
+from .replay import load_jsonl_snapshots
 from .util import canonical_json, decimal, stable_id
 
 
@@ -261,3 +265,74 @@ def write_outcome_artifact(result: dict[str, Any], path: str | Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("x", encoding="utf-8") as handle:
         handle.write(canonical_json(result) + "\n")
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        description="Trading Decision Automation Lab — post-hoc outcome labels"
+    )
+    result.add_argument("--jsonl", required=True, help="frozen normalized-snapshot JSON Lines input")
+    result.add_argument("--dataset-manifest", required=True, help="matching dataset manifest JSON")
+    result.add_argument("--replay", required=True, help="historical replay result JSON")
+    result.add_argument("--output", required=True, help="new immutable outcome-label JSON path")
+    result.add_argument(
+        "--horizons-bars",
+        default="1,4,16,96",
+        help="comma-separated completed-bar horizons; default 1,4,16,96",
+    )
+    return result
+
+
+def _read_json_object(path: str | Path, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OutcomeLabelError(f"cannot read {label}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise OutcomeLabelError(f"{label} must be a JSON object")
+    return value
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    manifest = _read_json_object(args.dataset_manifest, "dataset manifest")
+    source = manifest.get("source")
+    expected_dataset_id = manifest.get("dataset_id")
+    if not source or not expected_dataset_id:
+        raise OutcomeLabelError("dataset manifest is missing source or dataset_id")
+
+    snapshots = list(load_jsonl_snapshots(args.jsonl))
+    rows, rebuilt_manifest = build_dataset_artifact(snapshots, source=str(source))
+    if rebuilt_manifest["dataset_id"] != expected_dataset_id:
+        raise OutcomeLabelError("dataset manifest does not match snapshot JSONL")
+    if rebuilt_manifest["jsonl_sha256"] != manifest.get("jsonl_sha256"):
+        raise OutcomeLabelError("dataset manifest hash does not match snapshot JSONL")
+
+    replay_result = _read_json_object(args.replay, "replay result")
+    try:
+        horizons = tuple(int(item.strip()) for item in args.horizons_bars.split(",") if item.strip())
+    except ValueError as exc:
+        raise OutcomeLabelError("horizons-bars must be comma-separated integers") from exc
+
+    result = build_outcome_artifact(
+        rows,
+        replay_result,
+        dataset_id=str(expected_dataset_id),
+        horizons_bars=horizons,
+    )
+    write_outcome_artifact(result, args.output)
+    print(
+        json.dumps(
+            {
+                "label_set_id": result["label_set_id"],
+                **result["summary"],
+                "output": str(Path(args.output)),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
