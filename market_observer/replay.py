@@ -17,18 +17,13 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from .config import ObserverConfig
-from .engine import (
-    advance_breakout_retest,
-    assess_gates,
-    breakout_quality,
-    default_setup_state,
-    gate_outcome,
-)
+from .engine import default_setup_state
+from .evaluator import evaluate_snapshot
 from .features import FeatureError, calculate_features
 from .util import canonical_json, stable_id
 
 
-REPLAY_VERSION = "trading-decision-lab-replay-0.1.0"
+REPLAY_VERSION = "trading-decision-lab-replay-0.2.0"
 
 
 class ReplayError(ValueError):
@@ -125,28 +120,17 @@ class ReplayRunner:
                     gaps.append({"snapshot_index": index, **sequence})
                     state = default_setup_state()
 
-                gates = assess_gates(snapshot, features, self.config)
-                blocked = gate_outcome(gates)
-                data_fresh = not any(
-                    gate["status"] == "FAIL" and gate["category"] == "DATA_STALE"
-                    for gate in gates
-                )
-                quality = breakout_quality(features, self.config, data_fresh)
-                if blocked:
-                    signal = blocked
-                    state_updated = False
-                else:
-                    state, signal = advance_breakout_retest(state, features, quality, self.config)
-                    state_updated = sequence["status"] != "DUPLICATE"
+                evaluation = evaluate_snapshot(snapshot, self.config, state)
+                state = evaluation.state
                 decision = self._decision(
                     index=index,
                     snapshot=snapshot,
-                    features=features,
-                    gates=gates,
-                    quality=quality,
+                    features=evaluation.features,
+                    gates=evaluation.gates,
+                    quality=evaluation.quality,
                     state=state,
-                    signal=signal,
-                    state_updated=state_updated,
+                    signal=evaluation.signal,
+                    state_updated=evaluation.state_updated,
                     sequence=sequence,
                 )
                 previous_close_time = close_time
