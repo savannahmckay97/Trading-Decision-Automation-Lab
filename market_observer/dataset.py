@@ -22,7 +22,7 @@ class DatasetError(ValueError):
 def build_dataset_artifact(
     snapshots: Iterable[dict[str, Any]], *, source: str
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Validate and fingerprint snapshots without changing supplied order."""
+    """Validate and fingerprint snapshots without sorting away chronology evidence."""
     rows: list[dict[str, Any]] = []
     previous_observed: int | None = None
     identities: set[tuple[str, str]] = set()
