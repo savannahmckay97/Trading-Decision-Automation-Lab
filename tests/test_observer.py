@@ -290,7 +290,18 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(replay["signal"], evaluation.signal)
         self.assertEqual(replay["setup"]["state"], evaluation.state["state"])
         self.assertEqual(replay["features"], evaluation.features)
-        self.assertEqual(replay["gates"], evaluation.gates)
+        replay_gates = {gate["rule_id"]: gate for gate in replay["gates"]}
+        evaluation_gates = {gate["rule_id"]: gate for gate in evaluation.gates}
+        self.assertEqual(replay_gates.keys(), evaluation_gates.keys())
+        for rule_id in replay_gates:
+            self.assertEqual(replay_gates[rule_id]["status"], evaluation_gates[rule_id]["status"])
+            self.assertEqual(replay_gates[rule_id]["category"], evaluation_gates[rule_id]["category"])
+            if rule_id != "T0_OBSERVATION_ONLY":
+                self.assertEqual(replay_gates[rule_id]["evidence"], evaluation_gates[rule_id]["evidence"])
+        self.assertEqual(replay_gates["T0_OBSERVATION_ONLY"]["evidence"]["mode"], "historical_replay")
+        self.assertEqual(evaluation_gates["T0_OBSERVATION_ONLY"]["evidence"]["mode"], "observation_only")
+        self.assertFalse(replay_gates["T0_OBSERVATION_ONLY"]["evidence"]["orders_available"])
+        self.assertFalse(evaluation_gates["T0_OBSERVATION_ONLY"]["evidence"]["orders_available"])
 
     def test_sequence_gap_accounting_is_explicit(self):
         status = sequence_status(1_000_000, 1_000_000 + 3 * INTERVAL, INTERVAL)
