@@ -1,4 +1,4 @@
-"""One-cycle orchestration: collect, normalize, calculate, gate, journal."""
+"""One-cycle orchestration: collect, normalize, evaluate, journal."""
 
 from __future__ import annotations
 
@@ -6,22 +6,16 @@ from typing import Any
 
 from .collectors import PublicCollectors
 from .config import ObserverConfig
-from .engine import (
-    STRATEGY_ID,
-    advance_breakout_retest,
-    assess_gates,
-    breakout_quality,
-    default_setup_state,
-    gate_outcome,
-)
-from .features import FeatureError, calculate_features
+from .engine import STRATEGY_ID, default_setup_state
+from .evaluator import evaluate_snapshot
+from .features import FeatureError
 from .normalization import build_snapshot
 from .storage import EventStore
 from .util import now_ms
 
 
 class ObserverService:
-    VERSION = "trading-decision-lab-observer-0.1.0"
+    VERSION = "trading-decision-lab-observer-0.2.0"
 
     def __init__(
         self,
@@ -46,34 +40,31 @@ class ObserverService:
                 self.config.executable_pair,
             )
             snapshot_id = self.store.append_snapshot(snapshot)
-            features = calculate_features(snapshot, self.config)
-            gates = assess_gates(snapshot, features, self.config)
-            blocked = gate_outcome(gates)
-            data_fresh = not any(
-                gate["status"] == "FAIL" and gate["category"] == "DATA_STALE" for gate in gates
-            )
-            quality = breakout_quality(features, self.config, data_fresh)
             previous = self.store.load_setup_state(STRATEGY_ID, self.config.research_symbol)
-            if blocked:
-                setup = previous or default_setup_state()
-                signal = blocked
-                state_updated = False
-            else:
-                setup, signal = advance_breakout_retest(previous, features, quality, self.config)
-                self.store.save_setup_state(STRATEGY_ID, self.config.research_symbol, setup)
-                state_updated = True
+            evaluation = evaluate_snapshot(snapshot, self.config, previous)
+
+            if evaluation.state_updated:
+                self.store.save_setup_state(
+                    STRATEGY_ID,
+                    self.config.research_symbol,
+                    evaluation.state,
+                )
+
             decision = self._decision(
-                signal=signal,
-                setup=setup,
-                state_updated=state_updated,
+                signal=evaluation.signal,
+                setup=evaluation.state,
+                state_updated=evaluation.state_updated,
                 snapshot_id=snapshot_id,
-                features=features,
-                quality=quality,
-                gates=gates,
+                features=evaluation.features,
+                quality=evaluation.quality,
+                gates=evaluation.gates,
                 errors=[error.record() for error in errors],
             )
             self.store.append_decision(decision)
-            self.store.heartbeat("OK" if not blocked else "DEGRADED", signal)
+            self.store.heartbeat(
+                "OK" if evaluation.signal not in {"DATA_STALE", "RISK_BLOCKED"} else "DEGRADED",
+                evaluation.signal,
+            )
             return decision
         except (FeatureError, KeyError, TypeError, ValueError) as exc:
             decision = self._failure_decision(errors, exc, snapshot_id)
@@ -94,7 +85,7 @@ class ObserverService:
         errors: list[dict[str, Any]],
     ) -> dict[str, Any]:
         return {
-            "schema_version": "market_decision/0.1",
+            "schema_version": "market_decision/0.2",
             "observer_version": self.VERSION,
             "decision_time_ms": now_ms(),
             "mode": self.config.mode,
@@ -122,7 +113,7 @@ class ObserverService:
     def _failure_decision(self, errors: list, exc: Exception, snapshot_id: str | None) -> dict[str, Any]:
         setup = self.store.load_setup_state(STRATEGY_ID, self.config.research_symbol) or default_setup_state()
         return {
-            "schema_version": "market_decision/0.1",
+            "schema_version": "market_decision/0.2",
             "observer_version": self.VERSION,
             "decision_time_ms": now_ms(),
             "mode": self.config.mode,
