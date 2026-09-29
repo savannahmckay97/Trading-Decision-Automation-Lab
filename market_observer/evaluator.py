@@ -31,6 +31,8 @@ def evaluate_snapshot(
     snapshot: dict[str, Any],
     config: ObserverConfig,
     previous_state: dict[str, Any] | None,
+    *,
+    features: dict[str, Any] | None = None,
 ) -> Evaluation:
     """Evaluate one normalized snapshot without persistence or side effects.
 
@@ -39,15 +41,15 @@ def evaluate_snapshot(
     explicitly idempotent and is reported as not updating state.
     """
 
-    features = calculate_features(snapshot, config)
-    close_time = int(features["completed_candle_close_time_ms"])
-    gates = assess_gates(snapshot, features, config)
+    resolved_features = features if features is not None else calculate_features(snapshot, config)
+    close_time = int(resolved_features["completed_candle_close_time_ms"])
+    gates = assess_gates(snapshot, resolved_features, config)
     blocked = gate_outcome(gates)
     data_fresh = not any(
         gate["status"] == "FAIL" and gate["category"] == "DATA_STALE"
         for gate in gates
     )
-    quality = breakout_quality(features, config, data_fresh)
+    quality = breakout_quality(resolved_features, config, data_fresh)
     prior = previous_state or default_setup_state()
 
     if blocked:
@@ -56,11 +58,11 @@ def evaluate_snapshot(
         state_updated = False
     else:
         already_evaluated = prior.get("last_evaluated_close_time_ms") == close_time
-        state, signal = advance_breakout_retest(prior, features, quality, config)
+        state, signal = advance_breakout_retest(prior, resolved_features, quality, config)
         state_updated = not already_evaluated
 
     return Evaluation(
-        features=features,
+        features=resolved_features,
         gates=gates,
         quality=quality,
         state=state,
