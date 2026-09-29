@@ -20,8 +20,9 @@ See `PROJECT_BOUNDARY.md` for the full rule.
 2. `spec/rule_catalog.yaml` — 21 machine-readable foundation rules.
 3. `spec/data_dictionary.yaml` — 49 raw/config fields and 18 derived fields.
 4. `market_observer/` — public collectors, normalization, features, gates, state and storage.
-5. `market_observer/replay.py` — chronological replay over saved normalized snapshots.
-6. `tests/` — deterministic failure, progression, replay and recovery tests.
+5. `market_observer/evaluator.py` — one side-effect-free decision path shared by live observation and replay.
+6. `market_observer/replay.py` — chronological replay over saved normalized snapshots.
+7. `tests/` — deterministic failure, progression, replay, parity and recovery tests.
 
 ## First runnable behavior
 
@@ -98,6 +99,6 @@ Blocked or stale cycles freeze the state machine. Repeated polling of the same c
 
 ## Current verification boundary
 
-The 18-test deterministic suite passes. Live Binance and Kraken requests timed out from the original build environment, so real provider integration is **not** claimed. No ongoing process was started, no credential was used, and no order route exists.
+The deterministic suite now includes 20 tests, including live/replay evaluator parity and repeated-live-poll idempotence. GitHub Actions is configured to run the suite plus specification validation on Python 3.10 and 3.12. At the time of this rewrite, the connector had not surfaced a workflow run/status for the new commits, so a fresh green CI result is **not** claimed. Live Binance and Kraken provider integration also remains unverified. No credential is used and no order route exists.
 
 The next compartment is acquisition of a causally reconstructable historical dataset, followed by outcome labeling and a cost-aware paper-fill model. Parameter optimization and live execution remain out of scope.
