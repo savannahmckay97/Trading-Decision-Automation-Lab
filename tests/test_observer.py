@@ -8,6 +8,7 @@ from pathlib import Path
 from market_observer.collectors import CollectionError, PublicCollectors, RawEvent
 from market_observer.config import ObserverConfig
 from market_observer.engine import advance_breakout_retest, assess_gates, breakout_quality
+from market_observer.evaluator import evaluate_snapshot
 from market_observer.features import FeatureError, calculate_features
 from market_observer.normalization import build_snapshot
 from market_observer.risk import maximum_quantity
@@ -179,6 +180,23 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(counts["normalized_snapshots"], 2)
                 self.assertEqual(counts["decisions"], 2)
 
+    def test_repeated_live_poll_does_not_claim_state_update(self):
+        with EventStore(":memory:") as store:
+            service = ObserverService(
+                ObserverConfig(),
+                store,
+                SequenceCollectors([
+                    events_for("breakout"),
+                    events_for("breakout", received_offset=1),
+                ]),
+            )
+            first = service.cycle()
+            second = service.cycle()
+            self.assertTrue(first["setup"]["state_updated"])
+            self.assertFalse(second["setup"]["state_updated"])
+            self.assertEqual(second["setup"]["state"], "BREAKOUT_OBSERVED")
+            self.assertEqual(second["signal"], "WATCH_LONG")
+
     def test_backup_and_restore_preserve_state_and_records(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -264,6 +282,15 @@ class ReplayTests(unittest.TestCase):
             all(item["execution_permission"] == "DENIED_HISTORICAL_REPLAY" for item in result["decisions"])
         )
         self.assertFalse(result["summary"]["performance_claim_available"])
+
+    def test_shared_evaluator_matches_replay_decision(self):
+        snapshot = self.snapshot("breakout")
+        evaluation = evaluate_snapshot(snapshot, ObserverConfig(), None)
+        replay = ReplayRunner(ObserverConfig()).run([snapshot])["decisions"][0]
+        self.assertEqual(replay["signal"], evaluation.signal)
+        self.assertEqual(replay["setup"]["state"], evaluation.state["state"])
+        self.assertEqual(replay["features"], evaluation.features)
+        self.assertEqual(replay["gates"], evaluation.gates)
 
     def test_sequence_gap_accounting_is_explicit(self):
         status = sequence_status(1_000_000, 1_000_000 + 3 * INTERVAL, INTERVAL)
