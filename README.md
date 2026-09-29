@@ -22,7 +22,9 @@ See `PROJECT_BOUNDARY.md` for the full rule.
 4. `market_observer/` — public collectors, normalization, features, gates, state and storage.
 5. `market_observer/evaluator.py` — one side-effect-free decision path shared by live observation and replay.
 6. `market_observer/replay.py` — chronological replay over saved normalized snapshots.
-7. `tests/` — deterministic failure, progression, replay, parity and recovery tests.
+7. `market_observer/dataset.py` — immutable causal historical-dataset artifacts.
+8. `market_observer/outcomes.py` — post-hoc forward market labels, kept separate from evaluator inputs.
+9. `tests/` — deterministic failure, progression, replay, parity, dataset, outcome-label and recovery tests.
 
 ## First runnable behavior
 
@@ -50,8 +52,8 @@ Every output contains `action: NO_ORDER` and `execution_permission: DENIED_OBSER
 Python 3.10+; the observer has no third-party runtime dependency. Specification validation additionally uses PyYAML:
 
 ```sh
-python -m unittest discover -s tests -v
 python -m pip install '.[dev]'
+python -m unittest discover -s tests -v
 python spec/validate_specifications.py
 python observer.py --base TAO --pretty
 python observer.py --base TAO --loop --poll-seconds 60
@@ -83,7 +85,21 @@ python -m market_observer.replay \
 
 Replay input must already be chronological and must preserve the data actually available at each historical instant. The runner rejects reversed chronology, records duplicate and missing completed bars, resets an active setup across a detected gap, and refuses to overwrite a prior result file.
 
-This is **decision replay, not a profitability backtest**. It does not yet simulate fills, fees, slippage, funding, borrow, liquidation, returns or expectancy.
+This is **decision replay, not a profitability backtest**. It does not simulate fills, fees, slippage, funding, borrow, liquidation or expectancy.
+
+## Post-hoc outcome labels
+
+A frozen dataset and replay result can now be joined to future completed candles without contaminating the evaluator with future information. The label artifact records forward close return plus maximum favorable/adverse excursion at explicit completed-bar horizons. Missing future paths remain unavailable rather than being interpolated.
+
+```sh
+python -m market_observer.outcomes \
+  --jsonl snapshots.jsonl \
+  --dataset-manifest snapshots.manifest.json \
+  --replay results/tao_replay.json \
+  --output results/tao_outcomes.json
+```
+
+The default horizons are 1, 4, 16 and 96 completed 15-minute bars (15m, 1h, 4h and 24h). These are **market outcome labels, not trade returns**: no fill is assumed and no cost, funding, sizing or execution model is applied. Labels are post-hoc research artifacts and are forbidden as evaluator inputs.
 
 ## Meaning of signals
 
@@ -99,6 +115,6 @@ Blocked or stale cycles freeze the state machine. Repeated polling of the same c
 
 ## Current verification boundary
 
-The deterministic suite now includes 20 tests, including live/replay evaluator parity and repeated-live-poll idempotence. GitHub Actions is configured to run the suite plus specification validation on Python 3.10 and 3.12. At the time of this rewrite, the connector had not surfaced a workflow run/status for the new commits, so a fresh green CI result is **not** claimed. Live Binance and Kraken provider integration also remains unverified. No credential is used and no order route exists.
+The deterministic suite now includes 31 tests, including live/replay evaluator parity, repeated-live-poll idempotence, immutable dataset checks and post-hoc outcome-label safeguards. GitHub Actions runs the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
 
-The next compartment is acquisition of a causally reconstructable historical dataset, followed by outcome labeling and a cost-aware paper-fill model. Parameter optimization and live execution remain out of scope.
+The next compartment is a cost-aware paper-fill model built on the frozen dataset + outcome-label foundation. Parameter optimization and live execution remain out of scope.
