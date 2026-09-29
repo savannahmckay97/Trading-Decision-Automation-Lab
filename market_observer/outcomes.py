@@ -54,7 +54,7 @@ def build_outcome_artifact(
     if not replay_id or not isinstance(decisions, list):
         raise OutcomeLabelError("replay_result must contain replay_id and decisions")
 
-    tape = _completed_candle_tape(snapshots, interval_ms)
+    tape = completed_candle_tape(snapshots, interval_ms)
     labels = [
         _label_decision(decision, tape, interval_ms, horizons)
         for decision in decisions
@@ -103,7 +103,7 @@ def build_outcome_artifact(
     }
 
 
-def _completed_candle_tape(
+def completed_candle_tape(
     snapshots: Iterable[dict[str, Any]], interval_ms: int
 ) -> dict[int, dict[str, Any]]:
     tape: dict[int, dict[str, Any]] = {}
