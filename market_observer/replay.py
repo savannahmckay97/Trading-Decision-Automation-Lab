@@ -120,7 +120,7 @@ class ReplayRunner:
                     gaps.append({"snapshot_index": index, **sequence})
                     state = default_setup_state()
 
-                evaluation = evaluate_snapshot(snapshot, self.config, state)
+                evaluation = evaluate_snapshot(snapshot, self.config, state, features=features)
                 state = evaluation.state
                 decision = self._decision(
                     index=index,
