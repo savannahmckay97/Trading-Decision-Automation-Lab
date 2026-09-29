@@ -24,7 +24,8 @@ See `PROJECT_BOUNDARY.md` for the full rule.
 6. `market_observer/replay.py` — chronological replay over saved normalized snapshots.
 7. `market_observer/dataset.py` — immutable causal historical-dataset artifacts.
 8. `market_observer/outcomes.py` — post-hoc forward market labels, kept separate from evaluator inputs.
-9. `tests/` — deterministic failure, progression, replay, parity, dataset, outcome-label and recovery tests.
+9. `market_observer/paper.py` — deterministic cost-aware research-only paper fills.
+10. `tests/` — deterministic failure, progression, replay, parity, dataset, outcome-label, paper-fill and recovery tests.
 
 ## First runnable behavior
 
@@ -101,6 +102,25 @@ python -m market_observer.outcomes \
 
 The default horizons are 1, 4, 16 and 96 completed 15-minute bars (15m, 1h, 4h and 24h). These are **market outcome labels, not trade returns**: no fill is assumed and no cost, funding, sizing or execution model is applied. Labels are post-hoc research artifacts and are forbidden as evaluator inputs.
 
+## Cost-aware research paper fills
+
+`market_observer.paper` turns only `LONG_ELIGIBLE` replay decisions into one-unit hypothetical fills. Entry is the next completed research-venue bar open. The simulator applies the signal-time Kraken spread as a disclosed round-trip proxy, explicit fixed slippage and explicit fixed fees, then exits on the strategy invalidation level or a caller-supplied maximum holding period.
+
+No cost assumptions are silently defaulted. They must be supplied for each run:
+
+```sh
+python -m market_observer.paper \
+  --jsonl snapshots.jsonl \
+  --dataset-manifest snapshots.manifest.json \
+  --replay results/tao_replay.json \
+  --fee-bps-per-side "$FEE_BPS" \
+  --slippage-bps-per-side "$SLIPPAGE_BPS" \
+  --max-hold-bars "$MAX_HOLD_BARS" \
+  --output results/tao_paper_fills.json
+```
+
+The execution contract is deliberately conservative about what is known. Historical candles currently come from Binance USD-M research data, not a historical Kraken execution tape, so every fill records `executable_venue_validated: false`. Funding, order-book depth, latency, partial fills, queue position and liquidity impact remain unmodeled. The artifact reports per-unit hypothetical execution results only; it does not size positions, compound equity, authorize trades or make a strategy-performance claim.
+
 ## Meaning of signals
 
 | Signal | Meaning |
@@ -115,6 +135,6 @@ Blocked or stale cycles freeze the state machine. Repeated polling of the same c
 
 ## Current verification boundary
 
-The deterministic suite now includes 31 tests, including live/replay evaluator parity, repeated-live-poll idempotence, immutable dataset checks and post-hoc outcome-label safeguards. GitHub Actions runs the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
+The deterministic suite now includes 39 tests, including live/replay evaluator parity, repeated-live-poll idempotence, immutable dataset checks, post-hoc outcome-label safeguards and cost-aware paper-fill behavior. GitHub Actions runs the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
 
-The next compartment is a cost-aware paper-fill model built on the frozen dataset + outcome-label foundation. Parameter optimization and live execution remain out of scope.
+The next compartment is a deterministic RiskGovernor that can accept a structured proposed trade intent and either reject it or produce bounded research/paper sizing. It must remain incapable of live order submission. Experiment aggregation and benchmark reporting come after that; parameter optimization and live execution remain out of scope.
