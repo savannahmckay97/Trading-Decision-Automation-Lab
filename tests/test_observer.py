@@ -12,9 +12,11 @@ from market_observer.evaluator import evaluate_snapshot
 from market_observer.features import FeatureError, calculate_features
 from market_observer.normalization import build_snapshot
 from market_observer.risk import maximum_quantity
-from market_observer.replay import ReplayError, ReplayRunner, sequence_status, write_replay
+from market_observer.replay import (ReplayError, ReplayRunner, load_jsonl_snapshots,
+                                    load_sqlite_snapshots, sequence_status, write_replay)
 from market_observer.service import ObserverService
 from market_observer.storage import EventStore, default_database_path, restore_database
+from market_observer.util import canonical_json
 
 
 BASE_TIME = 2_000_000_000_000
@@ -322,6 +324,29 @@ class ReplayTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 write_replay({"result": "replacement"}, path)
             self.assertIn("first", path.read_text(encoding="utf-8"))
+
+    def test_saved_jsonl_and_sqlite_replay_match_in_memory_decisions(self):
+        snapshots = [self.snapshot("breakout"), self.snapshot("retest", received_offset=1)]
+        expected = ReplayRunner(ObserverConfig()).run(snapshots)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshots.jsonl"
+            path.write_text("".join(canonical_json(row) + "\n" for row in snapshots), encoding="utf-8")
+            actual = ReplayRunner(ObserverConfig()).run(load_jsonl_snapshots(path))
+            self.assertEqual(actual, expected)
+            database = Path(directory) / "observations.sqlite"
+            with EventStore(database) as store:
+                for row in snapshots:
+                    store.append_snapshot(row)
+            self.assertEqual(ReplayRunner(ObserverConfig()).run(load_sqlite_snapshots(database)), expected)
+
+    def test_saved_nonfinite_numeric_input_fails_closed(self):
+        snapshot = self.snapshot("breakout")
+        snapshot["candles_15m"][-2]["close"] = "NaN"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshots.jsonl"
+            path.write_text(canonical_json(snapshot) + "\n", encoding="utf-8")
+            with self.assertRaises(ReplayError):
+                list(load_jsonl_snapshots(path))
 
 
 if __name__ == "__main__":

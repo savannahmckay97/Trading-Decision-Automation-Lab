@@ -22,10 +22,11 @@ See `PROJECT_BOUNDARY.md` for the full rule.
 4. `market_observer/` — public collectors, normalization, features, gates, state and storage.
 5. `market_observer/evaluator.py` — one side-effect-free decision path shared by live observation and replay.
 6. `market_observer/replay.py` — chronological replay over saved normalized snapshots.
-7. `market_observer/dataset.py` — immutable causal historical-dataset artifacts.
+7. `market_observer/dataset.py` — immutable normalized historical-dataset artifacts.
 8. `market_observer/outcomes.py` — post-hoc forward market labels, kept separate from evaluator inputs.
 9. `market_observer/paper.py` — deterministic cost-aware research-only paper fills.
-10. `tests/` — deterministic failure, progression, replay, parity, dataset, outcome-label, paper-fill and recovery tests.
+10. `market_observer/evaluation.py` — dataset-bound descriptive comparisons against simple decision-selection baselines.
+11. `tests/` — deterministic failure, progression, replay, parity, dataset, outcome-label, paper-fill, evaluation and recovery tests.
 
 ## First runnable behavior
 
@@ -133,8 +134,28 @@ The execution contract is deliberately conservative about what is known. Histori
 
 Blocked or stale cycles freeze the state machine. Repeated polling of the same completed candle cannot advance it.
 
+## Decision usefulness evaluation
+
+The next question is whether the existing rule selects useful decision states, before building account controls or adding inputs. The evaluation command verifies the frozen dataset, rejects detectable future derivative rows/receipts, recomputes the shared replay and compares `LONG_ELIGIBLE` selections with positive-prior-return, select-all and abstain-all baselines on the same valid completed bars.
+
+```sh
+python -m market_observer.evaluation \
+  --jsonl snapshots.jsonl \
+  --dataset-manifest snapshots.manifest.json \
+  --experiment-id "$EXPERIMENT_ID" \
+  --partition exploratory \
+  --start-observed-at-ms "$WINDOW_START_MS" \
+  --end-observed-at-ms "$WINDOW_END_MS" \
+  --horizon-bars 4 \
+  --output results/tao_decision_evaluation.json
+```
+
+Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Provider timing semantics, synchronized derivative windows and real user benefit still require validation.
+
+See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigation and direction](docs/PRODUCT_DIRECTION.md).
+
 ## Current verification boundary
 
-The deterministic suite now includes 39 tests, including live/replay evaluator parity, repeated-live-poll idempotence, immutable dataset checks, post-hoc outcome-label safeguards and cost-aware paper-fill behavior. GitHub Actions runs the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
+The deterministic suite now includes 53 tests, including live/replay evaluator parity, saved JSONL/SQLite replay parity, repeated-live-poll idempotence, immutable dataset checks, post-hoc outcome-label safeguards, cost-aware paper-fill behavior and dataset-bound evaluation. GitHub Actions is configured to run the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
 
-The next compartment is a deterministic RiskGovernor that can accept a structured proposed trade intent and either reject it or produce bounded research/paper sizing. It must remain incapable of live order submission. Experiment aggregation and benchmark reporting come after that; parameter optimization and live execution remain out of scope.
+Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.

@@ -20,7 +20,7 @@ from .config import ObserverConfig
 from .engine import default_setup_state
 from .evaluator import evaluate_snapshot
 from .features import FeatureError, calculate_features
-from .util import canonical_json, stable_id
+from .util import canonical_json, decimal, stable_id
 
 
 REPLAY_VERSION = "trading-decision-lab-replay-0.2.0"
@@ -43,7 +43,34 @@ def load_jsonl_snapshots(path: str | Path) -> Iterator[dict[str, Any]]:
                 raise ReplayError(f"invalid JSON on line {line_number}: {exc}") from exc
             if not isinstance(value, dict):
                 raise ReplayError(f"line {line_number}: snapshot must be an object")
-            yield value
+            try:
+                yield _restore_snapshot_decimals(value)
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ReplayError(f"line {line_number}: invalid normalized numeric input: {exc}") from exc
+
+
+def _restore_snapshot_decimals(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Restore the Decimal values encoded as strings by canonical_json.
+
+    Decode only declared numeric fields; timestamps, identities, provenance and
+    missing values retain their meaning. Both persisted input routes use this
+    boundary so saved snapshots evaluate like in-memory normalized snapshots.
+    """
+    groups = [
+        ([snapshot.get("market", {})], ("binance_last_price", "kraken_last_price", "kraken_bid_price", "kraken_ask_price")),
+        (snapshot.get("candles_15m", []), ("open", "high", "low", "close", "volume")),
+        (snapshot.get("open_interest_5m", []), ("open_interest", "open_interest_value")),
+        (snapshot.get("taker_flow_5m", []), ("buy_volume", "sell_volume")),
+        (snapshot.get("funding_history", []), ("rate",)),
+    ]
+    groups.extend((rows, ("long_share", "short_share", "long_short_ratio"))
+                  for rows in snapshot.get("positioning", {}).values())
+    for rows, fields in groups:
+        for row in rows:
+            for field in fields:
+                if row.get(field) is not None:
+                    row[field] = decimal(row[field])
+    return snapshot
 
 
 def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) -> Iterator[dict[str, Any]]:
@@ -70,7 +97,10 @@ def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) 
             value = json.loads(payload_json)
             if not isinstance(value, dict):
                 raise ReplayError("stored normalized snapshot is not an object")
-            yield value
+            try:
+                yield _restore_snapshot_decimals(value)
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ReplayError(f"invalid stored normalized numeric input: {exc}") from exc
     finally:
         db.close()
 

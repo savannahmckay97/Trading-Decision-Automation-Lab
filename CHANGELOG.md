@@ -2,6 +2,12 @@
 
 All versions belong only to the independent **Trading Decision Automation Lab** project.
 
+## Unreleased — evaluation-first direction
+
+- Add frozen-dataset-bound descriptive decision evaluation against simple selection baselines, with missing/censored outcomes and abstention trade-offs disclosed.
+- Restore decimal fields when replaying saved JSONL/SQLite snapshots; verify persistence-to-replay parity.
+- Document the constrained MVP, product assumptions, causal limitations and evaluation-driven advancement gates.
+
 ## v0.2.0 — historical decision replay
 
 - Added chronological replay from this project's SQLite snapshots or JSON Lines.
