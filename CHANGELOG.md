@@ -4,6 +4,9 @@ All versions belong only to the independent **Trading Decision Automation Lab** 
 
 ## Unreleased — evaluation-first direction
 
+- Enforce one normalized as-of availability contract before live/replay features and offline evaluation; preserve state on temporal failures and report `ASOF_INVALID` replay cycles.
+- Add regressions for future evidence/receipts, strict timestamps, optional provenance and precomputed-feature bypass; document open-candle semantics and the local capture handoff.
+
 - Add frozen-dataset-bound descriptive decision evaluation against simple selection baselines, with missing/censored outcomes and abstention trade-offs disclosed.
 - Restore decimal fields when replaying saved JSONL/SQLite snapshots; verify persistence-to-replay parity.
 - Document the constrained MVP, product assumptions, causal limitations and evaluation-driven advancement gates.
@@ -26,3 +29,4 @@ All versions belong only to the independent **Trading Decision Automation Lab** 
 - Added the doctrine, 21-rule machine catalogue and data dictionary.
 - Added public Binance/Kraken collection, normalization, causal features, gates and persistent breakout/retest state.
 - Enforced observation-only behavior with no order route or credentials.
+

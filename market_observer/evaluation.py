@@ -15,6 +15,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable
 
+from .asof import AsOfError, validate_snapshot_asof
 from .config import ObserverConfig
 from .dataset import build_dataset_artifact
 from .outcomes import build_outcome_artifact, completed_candle_tape
@@ -189,23 +190,11 @@ def build_evaluation_artifact(
 
 
 def _audit_asof(snapshot: dict[str, Any], index: int) -> None:
-    """Reject detectable future derivative rows and receipts, without filling gaps."""
-    observed = int(snapshot["observed_at_ms"])
-    provenance = snapshot.get("provenance", {})
-    for name, event in provenance.items():
-        if int(event["received_time_ms"]) > observed:
-            raise EvaluationError(f"snapshot {index}: future receipt for {name}")
-    series = [
-        ("open_interest_5m", snapshot.get("open_interest_5m", []), "binance_oi_history"),
-        ("taker_flow_5m", snapshot.get("taker_flow_5m", []), "binance_taker"),
-        ("funding_history", snapshot.get("funding_history", []), "binance_funding"),
-    ]
-    series.extend((name, rows, None) for name, rows in snapshot.get("positioning", {}).items())
-    for name, rows, endpoint in series:
-        if rows and endpoint and endpoint not in provenance:
-            raise EvaluationError(f"snapshot {index}: {name} has no provenance")
-        if any(int(row["timestamp_ms"]) > observed for row in rows):
-            raise EvaluationError(f"snapshot {index}: future input in {name}")
+    """Use the runtime availability contract; reject the whole research run."""
+    try:
+        validate_snapshot_asof(snapshot)
+    except AsOfError as exc:
+        raise EvaluationError(f"snapshot {index}: {exc}") from exc
 
 
 def _policy_metrics(rows: list[dict[str, Any]], policy: str) -> dict[str, Any]:
@@ -266,3 +255,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

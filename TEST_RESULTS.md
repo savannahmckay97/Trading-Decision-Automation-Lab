@@ -1,6 +1,6 @@
-# Verification — evaluation-first intervention, 9 October 2026
+# Verification — shared as-of guard, 10 October 2026 (Melbourne)
 
-- **53/53 deterministic unit/integration tests passed locally on Python 3.12.14.**
+- **68/68 deterministic unit/integration tests passed locally on Python 3.12.14.**
 - Machine specifications validated: **21 rules, 49 raw/config fields, 18 derived fields.**
 - Python package compiled successfully.
 - Saved canonical JSONL and SQLite snapshots reproduce in-memory replay results.
@@ -13,8 +13,11 @@ Historical tests verify shared feature/rule replay, reverse-chronology rejection
 
 The evaluation tests cover a common baseline universe, duplicate-poll accounting, censoring at the evaluation boundary, unavailable outcomes, future derivative/receipt rejection, manifest mismatch, blocked observations, close versus wick invalidation, causal prefix parity, state warmup, declared holdout limitations, immutable CLI output and invalid evaluation designs. Two saved-input regressions cover JSONL/SQLite decimal round trips and rejection of non-finite numbers.
 
-All evaluation fixtures are synthetic. Passing these tests establishes behavior, not decision benefit, predictive edge or commercial demand. The evaluation boundary detects future rows; the live evaluator's derivative alignment/causality still needs hardening. Current paper fills remain hypothetical research scenarios rather than obtainable Kraken fills.
+All evaluation fixtures are synthetic. Passing these tests establishes behavior, not decision benefit, predictive edge or commercial demand. Live observation, replay and offline evaluation now share detectable as-of contradiction checks. Provider semantics, derivative alignment/continuity and live gap handling still need validation. Current paper fills remain hypothetical research scenarios rather than obtainable Kraken fills.
 
-The archived v0.2 verification recorded a bounded live probe that timed out against both providers. That historical claim is not a successful integration test, and this intervention did not rerun a provider probe. Live provider integration remains unverified.
+The archived v0.2 verification recorded a bounded live probe that timed out against both providers. That historical claim is not a successful integration test, and it is not evidence of successful integration. This guard follow-up made one bounded public time/ticker request per provider (4-second timeout, no retry); both timed out in this workspace. Live provider integration remains unverified.
 
 No order was placed, no credentials were used and no process was left running.
+
+
+The as-of regressions verify unchanged valid fixtures, future rows/events/receipts, strict timestamp types, matching optional provenance, optional unavailable annotations, normal open-candle exclusion, precomputed-feature bypass rejection and live/replay state preservation. PR #2 is the dependency (53 tests); this follow-up adds 15 tests. Remote matrix status is reported in the PR/delivery rather than inferred from local results.

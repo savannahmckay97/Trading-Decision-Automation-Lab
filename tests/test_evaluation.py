@@ -131,6 +131,19 @@ class DecisionEvaluationTests(unittest.TestCase):
             with self.assertRaisesRegex(EvaluationError, "manifest does not match"):
                 build_evaluation_artifact(rows, changed, observer_config=ObserverConfig(), config=self.config)
 
+    def test_shared_asof_contract_rejects_future_events_and_missing_annotation_provenance(self):
+        for change in ("event", "positioning_provenance"):
+            with self.subTest(change=change):
+                rows = copy.deepcopy(self.rows)
+                if change == "event":
+                    rows[0]["provenance"]["binance_taker"]["event_time_ms"] = rows[0]["observed_at_ms"] + 1
+                    reason = "future event"
+                else:
+                    del rows[0]["provenance"]["binance_global_ratio"]
+                    reason = "missing provenance"
+                with self.assertRaisesRegex(EvaluationError, reason):
+                    self.evaluate(rows)
+
     def test_blocked_observations_do_not_enter_any_selection_baseline(self):
         rows = copy.deepcopy(self.rows)
         for row in rows:
@@ -189,3 +202,4 @@ class DecisionEvaluationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
