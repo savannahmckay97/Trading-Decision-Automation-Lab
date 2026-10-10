@@ -23,7 +23,7 @@ from .replay import ReplayRunner, load_jsonl_snapshots
 from .util import canonical_json, decimal, stable_id
 
 
-EVALUATION_VERSION = "trading-decision-lab-evaluation-0.1.1"
+EVALUATION_VERSION = "trading-decision-lab-evaluation-0.2.0"
 POLICIES = ("TDAL", "POSITIVE_PRIOR_RETURN", "SELECT_ALL", "ABSTAIN_ALL")
 
 
@@ -136,6 +136,12 @@ def build_evaluation_artifact(
                     close_breach=any(bar["close"] < level for bar in path),
                     wick_touch=any(bar["low"] <= level for bar in path),
                 )
+        first_touch = None
+        if selected["TDAL"]:
+            path = None
+            if label["status"] == "AVAILABLE":
+                path = [tape[anchor + step * interval] for step in range(1, config.horizon_bars + 1)]
+            first_touch = _first_touch(decision.get("risk"), label, path)
         evaluated.append({
             "decision_id": decision["decision_id"],
             "observed_at_ms": observed,
@@ -144,13 +150,14 @@ def build_evaluation_artifact(
             "selected": selected,
             "outcome": label,
             "invalidation": invalidation,
+            "reward_first_touch": first_touch,
         })
 
     policies = {name: _policy_metrics(evaluated, name) for name in POLICIES}
     all_mean = policies["SELECT_ALL"]["mean_selected_forward_return_pct"]
     tdal_mean = policies["TDAL"]["mean_selected_forward_return_pct"]
     content = {
-        "schema_version": "decision_evaluation/0.1",
+        "schema_version": "decision_evaluation/0.2",
         "evaluation_version": EVALUATION_VERSION,
         "dataset_id": rebuilt["dataset_id"],
         "jsonl_sha256": rebuilt["jsonl_sha256"],
@@ -176,6 +183,7 @@ def build_evaluation_artifact(
             "close_breach_count": sum(row["invalidation"] is not None and row["invalidation"]["close_breach"] is True for row in evaluated),
             "wick_touch_count": sum(row["invalidation"] is not None and row["invalidation"]["wick_touch"] is True for row in evaluated),
         },
+        "tdal_reward_first_touch": _first_touch_summary(evaluated),
         "decisions": evaluated,
         "claims": {
             "descriptive_market_comparison_only": True,
@@ -193,9 +201,84 @@ def build_evaluation_artifact(
             "Partition is declared by the caller; preregistration and untouched status require an external experiment record",
             "Timestamp checks cannot prove provider publication semantics, revisions or synchronized feature windows",
             "The score is uncalibrated and is not a probability",
+            "Reward first-touch is gross price movement from the completed close; a target touch is not a fill",
+            "First-touch summaries condition on decisions that had a reward reference",
         ],
     }
     return {"evaluation_id": stable_id("decision_evaluation", content), **content}
+
+
+FIRST_TOUCH_STATUSES = (
+    "TARGET_FIRST", "STOP_FIRST", "AMBIGUOUS_SAME_BAR", "NEITHER_WITHIN_HORIZON",
+)
+
+
+def _first_touch(risk: Any, label: dict[str, Any], path: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Which of reward reference and invalidation the future path reaches first.
+
+    Two stop meanings are kept apart, as elsewhere. Wick rule: a bar whose low
+    touches invalidation. If the same bar also reaches the target, the
+    intrabar order is unknown and the result is AMBIGUOUS_SAME_BAR, never
+    resolved in either direction. Close rule: invalidation happens only at a
+    bar's close, so an intrabar target touch in that bar came first.
+    """
+    if not isinstance(risk, dict) or risk.get("status") != "AVAILABLE":
+        return {"status": "RISK_UNAVAILABLE"}
+    reward = risk.get("reward_reference") or {}
+    if reward.get("status") != "AVAILABLE":
+        return {"status": "TARGET_UNAVAILABLE", "reason": reward.get("reason")}
+    if path is None:
+        return {"status": label["status"], "reason": label.get("reason")}
+    target = decimal(reward["level"])
+    stop = decimal(risk["invalidation"]["level"])
+    ratio = decimal(reward["gross_opportunity_to_risk"])
+    wick = close = None
+    for step, bar in enumerate(path, start=1):
+        hit = bar["high"] >= target
+        if wick is None and (hit or bar["low"] <= stop):
+            wick = ("AMBIGUOUS_SAME_BAR" if hit and bar["low"] <= stop
+                    else "TARGET_FIRST" if hit else "STOP_FIRST", step)
+        if close is None and (hit or bar["close"] < stop):
+            close = ("TARGET_FIRST" if hit else "STOP_FIRST", step)
+        if wick is not None and close is not None:
+            break
+    neither = ("NEITHER_WITHIN_HORIZON", None)
+    wick, close = wick or neither, close or neither
+    return {
+        "status": "LABELED",
+        "target_level": target,
+        "invalidation_level": stop,
+        "gross_opportunity_to_risk": ratio,
+        # Hit rate at which a gross binary target/stop outcome breaks even.
+        "breakeven_target_rate": 1 / (1 + ratio),
+        "wick_stop": {"result": wick[0], "bars": wick[1]},
+        "close_stop": {"result": close[0], "bars": close[1]},
+    }
+
+
+def _first_touch_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    touches = [row["reward_first_touch"] for row in rows if row["reward_first_touch"] is not None]
+    labeled = [item for item in touches if item["status"] == "LABELED"]
+    summary: dict[str, Any] = {
+        "selected_count": len(touches),
+        "status_counts": dict(sorted(Counter(item["status"] for item in touches).items())),
+    }
+    for rule in ("wick_stop", "close_stop"):
+        counts = Counter(item[rule]["result"] for item in labeled)
+        decided = [item for item in labeled if item[rule]["result"] in {"TARGET_FIRST", "STOP_FIRST"}]
+        targets = sum(item[rule]["result"] == "TARGET_FIRST" for item in decided)
+        summary[rule] = {
+            "result_counts": {name: counts[name] for name in FIRST_TOUCH_STATUSES},
+            "decided_count": len(decided),
+            "target_first_fraction_of_decided": Decimal(targets) / len(decided) if decided else None,
+            # The fraction the ratios would need, on the same decided cases.
+            "mean_breakeven_target_rate_of_decided": (
+                sum((item["breakeven_target_rate"] for item in decided), Decimal(0)) / len(decided)
+                if decided else None
+            ),
+        }
+    summary["basis"] = "GROSS_DESCRIPTIVE_NO_COSTS_NOT_EXPECTANCY"
+    return summary
 
 
 def _audit_asof(snapshot: dict[str, Any], index: int) -> None:
