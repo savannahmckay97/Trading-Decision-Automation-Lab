@@ -42,4 +42,3 @@ PR #2 review fixes: censor outcome paths first received after the declared windo
 - Added the doctrine, 21-rule machine catalogue and data dictionary.
 - Added public Binance/Kraken collection, normalization, causal features, gates and persistent breakout/retest state.
 - Enforced observation-only behavior with no order route or credentials.
-

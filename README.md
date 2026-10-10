@@ -203,4 +203,3 @@ successful live provider integration remains unverified. No credential is used
 and no order route exists.
 
 Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.
-
