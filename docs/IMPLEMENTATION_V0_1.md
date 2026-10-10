@@ -14,6 +14,10 @@
 | Operator | `market_observer/cli.py` | One cycle or supervised polling loop |
 | Risk arithmetic | `market_observer/risk.py` | Cost-aware maximum quantity; never authorization |
 | Historical replay | `market_observer/replay.py` | Chronological reuse of production features, gates and setup state |
+| Frozen dataset | `market_observer/dataset.py` | Identity/chronology validation and canonical content fingerprints |
+| Post-hoc labels | `market_observer/outcomes.py` | Forward market movement, explicitly separated from decision inputs |
+| Hypothetical fills | `market_observer/paper.py` | Research-venue, independent one-unit cost/stop scenarios |
+| Decision evaluation | `market_observer/evaluation.py` | Dataset-bound descriptive selection/abstention comparisons |
 
 ## Implemented doctrine subset
 
@@ -31,8 +35,10 @@
 | Event blackout, account risk, portfolio heat and daily breaker | Specification only; required before execution eligibility |
 | Historical decision replay | Implemented; no performance claims |
 | Gap accounting and restart-safe backup/restore | Implemented and tested |
-| News sentiment, outcome labels, paper fills and orders | Not implemented |
+| Outcome labels and hypothetical paper fills | Implemented research artifacts; no strategy or executable-venue validation |
+| Dataset-bound benchmark evaluation | Implemented; descriptive comparisons, no significance or improvement claim |
+| News sentiment and orders | Not implemented |
 
 ## Advancement gate
 
-Next acquire or construct historical as-of snapshots without future leakage. Then add outcome labels and a cost-aware paper-fill model while preserving this replay baseline. Account for multiple testing, preserve chronological holdouts, and require paper reconciliation before discussing any execution component.
+Next verify actual provider timing/identity and causal derivative windows, then capture real as-of snapshots. Labels and hypothetical fills already exist. Use the evaluation harness and a preregistered user pilot to test the decision mechanism before expanding it. The harness rejects detectable future rows but cannot establish provider publication semantics or synchronized windows. Account for multiple testing and dependent labels; preserve untouched chronological holdouts. See `PRODUCT_DIRECTION.md` for evidence, MVP and advancement/retirement gates.

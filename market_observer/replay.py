@@ -11,10 +11,12 @@ import argparse
 import json
 import sqlite3
 from collections import Counter
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+from .asof import AsOfError, validate_snapshot_asof
 from .config import ObserverConfig
 from .engine import default_setup_state
 from .evaluator import evaluate_snapshot
@@ -96,23 +98,24 @@ class ReplayRunner:
         sequence_counts: Counter[str] = Counter()
 
         for index, original in enumerate(snapshots):
-            try:
-                snapshot = decode_snapshot(original, require_complete=True)
-            except SnapshotError as exc:
-                raise ReplayError(f"snapshot {index}: {exc}") from exc
+            snapshot = deepcopy(original)
             self._validate_identity(snapshot, index)
-            observed_at = int(snapshot["observed_at_ms"])
-            if previous_observed_at is not None and observed_at < previous_observed_at:
-                raise ReplayError(
-                    f"snapshot {index}: observed_at_ms moved backwards; input must be chronological"
-                )
-            previous_observed_at = observed_at
-            exchange_time = snapshot["exchange_time_ms"]
-            if previous_exchange_time is not None and exchange_time < previous_exchange_time:
-                raise ReplayError(f"snapshot {index}: exchange_time_ms moved backwards")
-            previous_exchange_time = exchange_time
-
+            observed_at = snapshot.get("observed_at_ms")
+            exchange_time = snapshot.get("exchange_time_ms")
+            if type(observed_at) is int:
+                if previous_observed_at is not None and observed_at < previous_observed_at:
+                    raise ReplayError(f"snapshot {index}: observed_at_ms moved backwards; input must be chronological")
+                previous_observed_at = observed_at
+            if type(exchange_time) is int:
+                if previous_exchange_time is not None and exchange_time < previous_exchange_time:
+                    raise ReplayError(f"snapshot {index}: exchange_time_ms moved backwards")
+                previous_exchange_time = exchange_time
             try:
+                validate_snapshot_asof(snapshot)
+                try:
+                    snapshot = decode_snapshot(snapshot, require_complete=True)
+                except SnapshotError as exc:
+                    raise ReplayError(f"snapshot {index}: {exc}") from exc
                 features = calculate_features(snapshot, self.config)
                 close_time = int(features["completed_candle_close_time_ms"])
                 sequence = sequence_status(previous_close_time, close_time, self.config.interval_ms)
@@ -145,8 +148,8 @@ class ReplayRunner:
                     sequence=sequence,
                 )
                 previous_close_time = close_time
-            except FeatureError as exc:
-                sequence_counts["FEATURE_INVALID"] += 1
+            except (FeatureError, AsOfError) as exc:
+                sequence_counts["ASOF_INVALID" if isinstance(exc, AsOfError) else "FEATURE_INVALID"] += 1
                 decision = self._failure(index, snapshot, state, exc)
 
             signal_counts[decision["signal"]] += 1
@@ -247,7 +250,7 @@ class ReplayRunner:
             "schema_version": "replay_decision/0.1",
             "replay_version": REPLAY_VERSION,
             "snapshot_index": index,
-            "observed_at_ms": int(snapshot.get("observed_at_ms", 0)),
+            "observed_at_ms": snapshot.get("observed_at_ms"),
             "completed_candle_close_time_ms": None,
             "research_symbol": self.config.research_symbol,
             "executable_pair": self.config.executable_pair,
@@ -255,7 +258,10 @@ class ReplayRunner:
             "action": "NO_ORDER",
             "execution_permission": "DENIED_HISTORICAL_REPLAY",
             "strategy_validated": False,
-            "sequence": {"status": "FEATURE_INVALID", "missing_bars": 0},
+            "sequence": {
+                "status": "ASOF_INVALID" if isinstance(exc, AsOfError) else "FEATURE_INVALID",
+                "missing_bars": 0,
+            },
             "setup": {**state, "state_updated": False},
             "breakout_quality": None,
             "features": None,
@@ -338,3 +344,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

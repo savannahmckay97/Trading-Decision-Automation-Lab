@@ -135,7 +135,7 @@ class IngestionTests(unittest.TestCase):
             self.assertTrue(all(value is None for value in row["market"].values()))
             self.assertEqual(decision["action"], "NO_ORDER")
             self.assertIsNone(decision["completed_candle_close_time_ms"])
-        self.assertIn("open-interest history is incomplete", str(result["decisions"][-1]["gates"]))
+        self.assertIn("required endpoint is missing", str(result["decisions"][-1]["gates"]))
 
     def test_reconstruction_cannot_hide_unverified_availability_or_future_rows(self):
         rows, _ = self.ingest()

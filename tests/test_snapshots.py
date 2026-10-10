@@ -110,8 +110,8 @@ class SnapshotBoundaryTests(unittest.TestCase):
                 rows[-1]["timestamp_ms"] = item["exchange_time_ms"] + 1
                 with self.assertRaisesRegex(SnapshotError, "future input"):
                     decode_snapshot(item)
-                with self.assertRaises(ReplayError):
-                    ReplayRunner(ObserverConfig()).run([item])
+                result = ReplayRunner(ObserverConfig()).run([item])
+                self.assertEqual(result["decisions"][0]["signal"], "DATA_STALE")
 
     def test_market_quantity_ranges_fail_closed(self):
         cases = [("open_interest_5m", "open_interest", "-1"),

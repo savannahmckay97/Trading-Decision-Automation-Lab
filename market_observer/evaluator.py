@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .asof import validate_snapshot_asof
 from .config import ObserverConfig
 from .engine import (
     advance_breakout_retest,
@@ -41,6 +42,7 @@ def evaluate_snapshot(
     explicitly idempotent and is reported as not updating state.
     """
 
+    validate_snapshot_asof(snapshot)
     resolved_features = features if features is not None else calculate_features(snapshot, config)
     close_time = int(resolved_features["completed_candle_close_time_ms"])
     gates = assess_gates(snapshot, resolved_features, config)
@@ -70,3 +72,4 @@ def evaluate_snapshot(
         state_updated=state_updated,
         completed_candle_close_time_ms=close_time,
     )
+

@@ -22,12 +22,13 @@ See `PROJECT_BOUNDARY.md` for the full rule.
 4. `market_observer/` — public collectors, normalization, features, gates, state and storage.
 5. `market_observer/evaluator.py` — one side-effect-free decision path shared by live observation and replay.
 6. `market_observer/replay.py` — chronological replay over saved normalized snapshots.
-7. `market_observer/dataset.py` — immutable causal historical-dataset artifacts.
+7. `market_observer/dataset.py` — immutable normalized historical-dataset artifacts.
 8. `market_observer/outcomes.py` — post-hoc forward market labels, kept separate from evaluator inputs.
 9. `market_observer/paper.py` — deterministic cost-aware research-only paper fills.
 10. `market_observer/ingestion.py` — bounded offline historical candle imports, explicitly incomplete and unverified as-of reconstructions.
 11. `market_observer/snapshots.py` — shared typed snapshot boundary and exact persisted-decimal decoding.
-12. `tests/` — deterministic failure, progression, replay, parity, dataset, ingestion, outcome-label, paper-fill and recovery tests.
+12. `market_observer/evaluation.py` — dataset-bound descriptive comparisons against simple decision-selection baselines.
+13. `tests/` — deterministic live/replay, dataset, ingestion, outcome, paper and evaluation tests.
 
 ## First runnable behavior
 
@@ -169,16 +170,37 @@ The execution contract is deliberately conservative about what is known. Histori
 | `DATA_STALE` | Required data is missing, malformed, discontinuous or old |
 | `RISK_BLOCKED` | Spread, venue-confirmation or mode veto failed |
 
-Blocked or stale cycles freeze the state machine. Repeated polling of the same completed candle cannot advance it.
+Blocked or stale cycles freeze the state machine. Repeated polling of the same completed candle cannot advance it. The shared as-of guard rejects detectable future derivative evidence, events and receipts before live/replay feature calculation, including when precomputed features are supplied. Offline evaluation uses the same guard. See [availability contract and working-loop path](docs/ASOF_CONTRACT.md) for timestamp semantics, limitations and local capture instructions.
+
+## Decision usefulness evaluation
+
+The next question is whether the existing rule selects useful decision states, before building account controls or adding inputs. The evaluation command verifies the frozen dataset, rejects detectable future derivative rows/receipts, recomputes the shared replay and compares `LONG_ELIGIBLE` selections with positive-prior-return, select-all and abstain-all baselines on the same valid completed bars.
+
+```sh
+python -m market_observer.evaluation \
+  --jsonl snapshots.jsonl \
+  --dataset-manifest snapshots.manifest.json \
+  --experiment-id "$EXPERIMENT_ID" \
+  --partition exploratory \
+  --start-observed-at-ms "$WINDOW_START_MS" \
+  --end-observed-at-ms "$WINDOW_END_MS" \
+  --horizon-bars 4 \
+  --output results/tao_decision_evaluation.json
+```
+
+Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Provider timing semantics, synchronized derivative windows and real user benefit still require validation.
+
+See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigation and direction](docs/PRODUCT_DIRECTION.md).
 
 ## Current verification boundary
 
-The deterministic suite now includes 60 tests, including ingestion, JSONL/SQLite
-round-trip replay parity, nested input isolation, competing-writer protection,
-live/replay evaluator parity, immutable datasets, outcome labels and paper fills.
+The integrated deterministic suite includes 99 tests covering live/replay guards,
+persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
+manifest compatibility, outcome/paper workflows and descriptive evaluation.
 GitHub Actions runs the suite plus specification validation on Python 3.10 and
-3.12. The ingestion implementation's Binance request returned HTTP 451, so its
-integrated checks used synthetic fixtures. Live Binance and Kraken provider
-integration remains unverified. No credential is used and no order route exists.
+3.12. The ingestion implementation's Binance request returned HTTP 451;
+successful live provider integration remains unverified. No credential is used
+and no order route exists.
 
-The next compartment is a deterministic RiskGovernor that can accept a structured proposed trade intent and either reject it or produce bounded research/paper sizing. It must remain incapable of live order submission. Experiment aggregation and benchmark reporting come after that; parameter optimization and live execution remain out of scope.
+Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.
+
