@@ -52,3 +52,29 @@ otherwise be derived from inputs that failed a gate.
 These numbers describe the setup's own geometry. They are not evidence that the
 invalidation level is a good stop, that losses are bounded at it, or that the
 setup has predictive value.
+
+## Agreed sequencing (10 October 2026)
+
+Per-trade risk is useful now; account-exposure governance waits for validated
+trade proposals.
+
+1. **Complete the open PR integration** (#2 evaluation-first, then #3 as-of
+   guard, then #5 historical ingestion). This branch builds on #2 and must be
+   reconciled with #3/#5 after they merge.
+2. **Complete the per-trade assessment.** Each assessment must explicitly
+   report:
+   - entry reference — present, but only as the completed research close; a
+     causal arrival price needs the observation-time fix noted in
+     `PRODUCT_DIRECTION.md` (paper entry vs `observed_at_ms`);
+   - invalidation and stop distance — present (`invalidation`, `per_unit_risk`);
+   - estimated costs — partial: Kraken spread proxy only; fee and slippage must
+     be explicit caller-supplied inputs, never silent defaults;
+   - available reward — absent (`NOT_DEFINED_BY_STRATEGY`). A target definition
+     must be chosen and frozen *before* examining outcomes, then reward and
+     reward/risk follow mechanically.
+3. **Establish predictive usefulness** of those assessments with the PR #2
+   evaluation harness on real, provider-verified as-of data against baselines
+   and unseen periods.
+4. **Build the full RiskGovernor** (account equity, heat, breakers, sizing via
+   `risk.maximum_quantity`) only once step 3 shows trade proposals reliable
+   enough to govern. Live order submission remains out of scope throughout.
