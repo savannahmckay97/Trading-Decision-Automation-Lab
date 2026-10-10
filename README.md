@@ -196,11 +196,13 @@ python -m market_observer.evaluation \
 
 Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Provider timing semantics, synchronized derivative windows and real user benefit still require validation.
 
+Evaluation 0.2 also labels each TDAL selection by whether its reward reference or its invalidation is reached first. See [evaluation readiness](docs/EVALUATION_READINESS.md) for why no real dataset can yet produce TDAL selections, and the measured setup frequency.
+
 See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigation and direction](docs/PRODUCT_DIRECTION.md).
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 136 tests covering live/replay guards, the
+The integrated deterministic suite includes 148 tests covering live/replay guards, the
 per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
 manifest compatibility, outcome/paper workflows and descriptive evaluation.
 GitHub Actions runs the suite plus specification validation on Python 3.10 and

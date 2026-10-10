@@ -1,4 +1,4 @@
-# Decision evaluation contract — 0.1
+# Decision evaluation contract — 0.2
 
 This is a small research harness for the existing rule. It introduces no broker,
 service, database, optimizer or alternative strategy framework.
@@ -68,6 +68,32 @@ there is no second breakout/retest implementation.
 
 The state-machine predicate uses a close breach; the paper model uses a wick
 stop. The harness reports both and does not silently equate them.
+
+### Reward reference first touch (0.2)
+
+For each TDAL selection, `reward_first_touch` records whether the future path
+reaches the decision's reward reference (`risk.reward_reference.level`) or its
+invalidation first. The result is one of `TARGET_FIRST`, `STOP_FIRST`,
+`AMBIGUOUS_SAME_BAR` or `NEITHER_WITHIN_HORIZON`, plus the bar count. It is
+labelled separately under two stop meanings:
+
+- **Wick rule** (the low touches invalidation): if a bar reaches both, the
+  intrabar order is unknowable from 15m bars and the result stays
+  `AMBIGUOUS_SAME_BAR`. It is never resolved optimistically or pessimistically.
+- **Close rule** (the close is below invalidation): the breach only happens at
+  the close, so an intrabar target touch in the same bar came first.
+
+Selections without a reward reference (`TARGET_UNAVAILABLE`), without a risk
+contract, or with censored/unavailable paths are counted but never scored.
+`tdal_reward_first_touch` reports, on the same decided cases, the target-first
+fraction, the breakeven rate at the mean ratio `1 / (1 + mean r)` (the rate at
+which a set of 1R-risk cases with payoffs rᵢ breaks even under one common hit
+rate), and the realised gross R (`+rᵢ` per target-first, `−1` per stop-first).
+Averaging `1/(1+rᵢ)` would overstate the threshold, because the function is
+convex. Realised R does not assume the hit rate is independent of the ratio.
+Gross R assumes exits exactly at the levels. This is gross price movement from
+the completed close: a touch is not a fill, there are no costs, and it is
+conditional on a target having existed. It is not expectancy.
 
 Every future bar in the requested path must exist. Labels with a target beyond
 the evaluation window are censored even if later snapshots contain them. Missing
