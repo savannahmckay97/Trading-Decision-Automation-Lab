@@ -1,5 +1,7 @@
 # Changelog
 
+PR #2 review fixes: censor outcome paths first received after the declared window; reject duplicate, gapped or insufficient 5-minute derivative histories. Regression suite: 55 tests.
+
 All versions belong only to the independent **Trading Decision Automation Lab** project.
 
 ## Unreleased — evaluation-first direction
