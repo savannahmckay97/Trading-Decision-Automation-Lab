@@ -23,7 +23,7 @@ from .replay import ReplayRunner, load_jsonl_snapshots
 from .util import canonical_json, decimal, stable_id
 
 
-EVALUATION_VERSION = "trading-decision-lab-evaluation-0.1.0"
+EVALUATION_VERSION = "trading-decision-lab-evaluation-0.1.1"
 POLICIES = ("TDAL", "POSITIVE_PRIOR_RETURN", "SELECT_ALL", "ABSTAIN_ALL")
 
 
@@ -85,6 +85,9 @@ def build_evaluation_artifact(
     )
     labels = {label["decision_id"]: label for label in outcomes["labels"]}
     tape = completed_candle_tape(rows, interval)
+    window_tape = completed_candle_tape(
+        [row for row in rows if row["observed_at_ms"] <= config.end_observed_at_ms], interval,
+    ) if any(row["observed_at_ms"] <= config.end_observed_at_ms for row in rows) else {}
     seen: set[int] = set()
     evaluated: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()
@@ -107,6 +110,11 @@ def build_evaluation_artifact(
         label = labels[decision["decision_id"]]["horizons"][str(config.horizon_bars)]
         if target > config.end_observed_at_ms:
             label = {"status": "CENSORED", "reason": "horizon_exceeds_evaluation_window"}
+        elif label["status"] == "AVAILABLE" and any(
+            anchor + step * interval not in window_tape
+            for step in range(1, config.horizon_bars + 1)
+        ):
+            label = {"status": "CENSORED", "reason": "path_not_observed_by_window_end"}
         features = decision["features"]
         selected = {
             "TDAL": decision["signal"] == "LONG_ELIGIBLE",
@@ -195,6 +203,7 @@ def _audit_asof(snapshot: dict[str, Any], index: int) -> None:
         validate_snapshot_asof(snapshot)
     except AsOfError as exc:
         raise EvaluationError(f"snapshot {index}: {exc}") from exc
+
 
 
 def _policy_metrics(rows: list[dict[str, Any]], policy: str) -> dict[str, Any]:

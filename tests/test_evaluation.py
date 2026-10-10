@@ -102,6 +102,31 @@ class DecisionEvaluationTests(unittest.TestCase):
         self.assertIsNone(selected["mean_selected_forward_return_pct"])
         self.assertIsNone(result["tdal_selection_lift_vs_all_pct_points"])
 
+    def test_target_closed_but_not_received_by_window_end_is_censored(self):
+        target = self.rows[2]["candles_15m"][-2]["close_time_ms"]
+        result = self.evaluate(config=replace(self.config, end_observed_at_ms=target + 1))
+        selected = result["policies"]["TDAL"]
+        self.assertEqual(selected["labeled_selected_count"], 0)
+        self.assertIsNone(selected["mean_selected_forward_return_pct"])
+        eligible = next(row for row in result["decisions"] if row["selected"]["TDAL"])
+        self.assertEqual(eligible["outcome"]["reason"], "path_not_observed_by_window_end")
+        self.assertIsNone(eligible["invalidation"]["wick_touch"])
+
+    def test_duplicate_gap_and_short_derivative_histories_are_rejected(self):
+        for name in ("open_interest_5m", "taker_flow_5m"):
+            for change in ("duplicate", "gap", "short"):
+                with self.subTest(name=name, change=change):
+                    rows = copy.deepcopy(self.rows)
+                    series = rows[0][name]
+                    if change == "duplicate":
+                        series[-1]["timestamp_ms"] = series[-2]["timestamp_ms"]
+                    elif change == "gap":
+                        del series[-2]
+                    else:
+                        rows[0][name] = series[-2:]
+                    with self.assertRaisesRegex(EvaluationError, "discontinuous derivative"):
+                        self.evaluate(rows)
+
     def test_missing_future_bar_remains_unavailable(self):
         rows = copy.deepcopy(self.rows)
         missing_close = rows[2]["candles_15m"][-2]["close_time_ms"]

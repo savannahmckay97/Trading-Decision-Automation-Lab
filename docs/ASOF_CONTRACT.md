@@ -100,3 +100,5 @@ work, not features delivered by this guard. No process has been started on the
 user's machine. The cloud workspace's bounded Binance/Kraken probes timed out;
 this is an environment-specific unresolved connectivity result, not an outage
 claim or evidence that the same requests fail from the local machine.
+
+Review follow-up: required OI history covers at least 13 consecutive five-minute points (the one-hour change), and taker history at least three. Duplicate or missing intervals block live/replay before features or setup state updates. Auxiliary row timestamps must not exceed the exchange cutoff, even when local receipt occurs later.

@@ -47,6 +47,34 @@ class AsOfContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(AsOfError, "positioning.*future input"):
                     validate_snapshot_asof(row)
 
+    def test_derivative_gaps_block_live_replay_and_precomputed_features(self):
+        for name in ("open_interest_5m", "taker_flow_5m"):
+            for change in ("gap", "duplicate", "short"):
+                with self.subTest(name=name, change=change):
+                    row = snapshot("retest")
+                    cached = calculate_features(row, ObserverConfig())
+                    prior = evaluate_snapshot(snapshot(), ObserverConfig(), None).state
+                    before = copy.deepcopy(prior)
+                    if change == "gap":
+                        del row[name][-2]
+                    elif change == "duplicate":
+                        row[name][-1]["timestamp_ms"] = row[name][-2]["timestamp_ms"]
+                    else:
+                        row[name] = row[name][-2:]
+                    with self.assertRaisesRegex(AsOfError, "discontinuous derivative"):
+                        evaluate_snapshot(row, ObserverConfig(), prior, features=cached)
+                    self.assertEqual(prior, before)
+                    decision = ReplayRunner(ObserverConfig()).run([row])["decisions"][0]
+                    self.assertEqual(decision["signal"], "DATA_STALE")
+                    self.assertEqual(decision["sequence"]["status"], "ASOF_INVALID")
+
+    def test_derivative_row_after_exchange_but_before_receipt_is_future(self):
+        row = snapshot()
+        row["observed_at_ms"] += 1000
+        row["open_interest_5m"][-1]["timestamp_ms"] = row["exchange_time_ms"] + 1
+        with self.assertRaisesRegex(AsOfError, "future input"):
+            validate_snapshot_asof(row)
+
     def test_future_receipts_and_events_are_rejected(self):
         for field, reason in (("received_time_ms", "future receipt"), ("event_time_ms", "future event")):
             with self.subTest(field=field):
@@ -67,7 +95,9 @@ class AsOfContractTests(unittest.TestCase):
             event["event_time_ms"] = row["observed_at_ms"]
             event["received_time_ms"] = row["observed_at_ms"]
         for name in ("open_interest_5m", "taker_flow_5m", "funding_history"):
-            row[name][-1]["timestamp_ms"] = row["observed_at_ms"]
+            delta = row["observed_at_ms"] - row[name][-1]["timestamp_ms"]
+            for item in row[name]:
+                item["timestamp_ms"] += delta
         for series in row["positioning"].values():
             series[-1]["timestamp_ms"] = row["observed_at_ms"]
         validate_snapshot_asof(row)

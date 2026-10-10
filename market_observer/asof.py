@@ -76,8 +76,13 @@ def validate_snapshot_asof(snapshot: dict[str, Any]) -> None:
             if not isinstance(row, dict):
                 raise AsOfError(f"{name}[{index}]: row must be an object")
             timestamp = _timestamp(row.get("timestamp_ms"), field)
-            if timestamp > observed:
+            if timestamp > exchange:
                 raise AsOfError(f"{field}: future input")
+        if name in {"open_interest_5m", "taker_flow_5m"}:
+            clocks = [row["timestamp_ms"] for row in rows]
+            minimum = 13 if name == "open_interest_5m" else 3
+            if len(clocks) < minimum or any(b - a != 300_000 for a, b in zip(clocks, clocks[1:])):
+                raise AsOfError(f"{name}: discontinuous derivative history")
 
     series("open_interest_5m", snapshot.get("open_interest_5m"), "binance_oi_history", required=True)
     series("taker_flow_5m", snapshot.get("taker_flow_5m"), "binance_taker", required=True)
