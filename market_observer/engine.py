@@ -66,6 +66,10 @@ def assess_gates(snapshot: dict[str, Any], features: dict[str, Any], config: Obs
         if basis is None:
             stale[name] = "missing_event_time"
             continue
+        # A response cannot be newer than its own receipt. Measuring from the
+        # earlier clock stops an event stamped after receipt from making an old
+        # response look fresh, without rejecting provider/local clock skew.
+        basis = min(int(basis), int(item["received_time_ms"]))
         age = observed - int(basis)
         if age < -5_000 or age > limit:
             stale[name] = {"age_ms": age, "limit_ms": limit}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from email.utils import format_datetime
+import http.client
 from io import BytesIO
 import unittest
 from unittest.mock import patch
@@ -119,6 +120,57 @@ class HttpRetryTests(unittest.TestCase):
                     JsonHttpClient(opener=opener).get(BASE, "/probe")
                 self.assertEqual(len(opener.calls), 1)
                 sleep.assert_not_called()
+
+    def test_truncated_body_and_bad_status_line_retry_as_transport_failures(self):
+        class Truncated(BytesIO):
+            def read(self, *args):
+                raise http.client.IncompleteRead(b'{"pri', 20)
+
+        for failure in (Truncated(), http.client.BadStatusLine("garbage")):
+            with self.subTest(failure=type(failure).__name__), patch("market_observer.http.time.sleep") as sleep:
+                calls = []
+
+                def opener(request, **kwargs):
+                    calls.append(request.full_url)
+                    if len(calls) == 1:
+                        if isinstance(failure, Exception):
+                            raise failure
+                        return failure
+                    return BytesIO(b'{"price":"100"}')
+
+                self.assertEqual(JsonHttpClient(opener=opener).get(BASE, "/probe"), {"price": "100"})
+                self.assertEqual(len(calls), 2)
+                sleep.assert_called_once_with(1)
+
+    def test_rate_limits_declared_in_successful_bodies_start_host_cooldown(self):
+        bodies = (
+            b'{"error":["EAPI:Rate limit exceeded"]}',
+            b'{"error":["EGeneral:Too many requests"]}',
+            b'{"error":["EService:Throttled: 1760140800"]}',
+            b'{"code":-1003,"msg":"Too many requests"}',
+        )
+        for body in bodies:
+            with self.subTest(body=body), patch("market_observer.http.time.sleep") as sleep:
+                clock = [100.0]
+                opener = Responses(body, b'{"ok":true}')
+                client = JsonHttpClient(opener=opener)
+                with patch("market_observer.http.time.monotonic", side_effect=lambda: clock[0]):
+                    with self.assertRaisesRegex(HttpError, "provider rate limit.*cooldown 60s"):
+                        client.get("https://api.kraken.com", "/0/public/Ticker")
+                    clock[0] = 159.0
+                    with self.assertRaisesRegex(HttpError, "cooldown"):
+                        client.get("https://api.kraken.com", "/0/public/Ticker")
+                    self.assertEqual(len(opener.calls), 1)
+                    clock[0] = 160.0
+                    self.assertTrue(client.get("https://api.kraken.com", "/0/public/Ticker")["ok"])
+                sleep.assert_not_called()
+
+    def test_other_declared_provider_errors_do_not_start_cooldown(self):
+        opener = Responses(b'{"error":["EQuery:Unknown asset pair"]}', b'{"ok":true}')
+        client = JsonHttpClient(opener=opener)
+        with self.assertRaisesRegex(HttpError, "Unknown asset pair"):
+            client.get("https://api.kraken.com", "/0/public/Ticker")
+        self.assertTrue(client.get("https://api.kraken.com", "/0/public/Ticker")["ok"])
 
 
 class EmptySeriesTests(unittest.TestCase):

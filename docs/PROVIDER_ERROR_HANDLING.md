@@ -12,9 +12,14 @@ The HTTP client now separates transient failures from deterministic responses:
   calls may proceed. No worker sleeps for an unbounded provider deadline.
   Already in-flight requests cannot be recalled. Cooldowns are in memory and
   do not survive a client/process restart; restart is not a rate-limit remedy.
+- Rate limits reported inside an HTTP 200 body start the same per-origin
+  cooldown, using the 60-second default: Kraken `EAPI:Rate limit exceeded`,
+  `EGeneral:Too many requests`, `EService:Throttled`, and Binance `-1003`.
 - Transport failures and HTTP 5xx use the existing bounded attempts and 1s/2s
-  backoff at the default three-attempt setting. Provider-declared JSON errors
-  and malformed JSON fail immediately.
+  backoff at the default three-attempt setting. Transport failures include
+  `http.client.HTTPException` (truncated bodies, bad status lines), which are
+  not `OSError`s. Other provider-declared JSON errors and malformed JSON fail
+  immediately.
 
 HTTP errors retain at most 1024 bytes of response body, decoded with replacement
 and marked when truncated; response handles are closed. Thus Binance's

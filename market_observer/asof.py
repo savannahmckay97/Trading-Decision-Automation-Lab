@@ -63,6 +63,9 @@ def validate_snapshot_asof(snapshot: dict[str, Any]) -> None:
         # open candle. It is a scheduled boundary, not a publication timestamp.
         if endpoint != "binance_klines" and event_time > observed:
             raise AsOfError(f"{field}.event_time_ms: future event")
+        # exchange_time_ms is this response's serverTime; series cutoffs use it.
+        if endpoint == "binance_time" and event_time != exchange:
+            raise AsOfError(f"{field}.event_time_ms: does not match exchange_time_ms")
 
     def series(name: str, rows: Any, endpoint: str, *, required: bool = False) -> None:
         if not isinstance(rows, list) or (required and not rows):
