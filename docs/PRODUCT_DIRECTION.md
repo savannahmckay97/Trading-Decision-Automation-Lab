@@ -6,6 +6,8 @@ This document distinguishes verified repository facts, inference and proposed
 validation. It supersedes the README's previous RiskGovernor-first sequencing;
 it does not replace the historical doctrine or merge another project.
 
+Follow-up, 10 October 2026 (Melbourne): the shared as-of guard now closes the detectable future-row/receipt runtime failure described below; see `ASOF_CONTRACT.md`. The investigation below records the original baseline and evaluation-first intervention. Provider semantics, synchronized windows, live gap handling and product utility remain unverified.
+
 ## 1. Executive finding
 
 **TDAL is a deterministic observation/research prototype for one long breakout
@@ -485,3 +487,4 @@ and invalidations, and disclose dependent samples. Repair arrival-time and
 venue/currency/cost modeling before any economic claim; if no execution tape is
 available, deliver descriptive findings only. Produce an adopt/simplify/reject/
 inconclusive decision for the score and setup. No optimizer or extra feed.
+

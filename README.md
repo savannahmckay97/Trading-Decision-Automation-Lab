@@ -132,7 +132,7 @@ The execution contract is deliberately conservative about what is known. Histori
 | `DATA_STALE` | Required data is missing, malformed, discontinuous or old |
 | `RISK_BLOCKED` | Spread, venue-confirmation or mode veto failed |
 
-Blocked or stale cycles freeze the state machine. Repeated polling of the same completed candle cannot advance it.
+Blocked or stale cycles freeze the state machine. Repeated polling of the same completed candle cannot advance it. The shared as-of guard rejects detectable future derivative evidence, events and receipts before live/replay feature calculation, including when precomputed features are supplied. Offline evaluation uses the same guard. See [availability contract and working-loop path](docs/ASOF_CONTRACT.md) for timestamp semantics, limitations and local capture instructions.
 
 ## Decision usefulness evaluation
 
@@ -156,6 +156,7 @@ See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigatio
 
 ## Current verification boundary
 
-The deterministic suite now includes 53 tests, including live/replay evaluator parity, saved JSONL/SQLite replay parity, repeated-live-poll idempotence, immutable dataset checks, post-hoc outcome-label safeguards, cost-aware paper-fill behavior and dataset-bound evaluation. GitHub Actions is configured to run the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
+The deterministic suite now includes 68 tests, including live/replay evaluator parity, saved JSONL/SQLite replay parity, repeated-live-poll idempotence, immutable dataset checks, post-hoc outcome-label safeguards, cost-aware paper-fill behavior and dataset-bound evaluation. GitHub Actions is configured to run the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
 
 Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.
+

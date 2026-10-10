@@ -20,7 +20,7 @@ the product. Those need separate evidence.
 - An experiment ID, declared exploratory/holdout partition, inclusive observation
   start/end timestamps and one explicit completed-bar horizon.
 
-Rebuild and compare the manifest, audit detectable future rows and receipts,
+Rebuild and compare the manifest, use the shared runtime as-of availability validator,
 recompute shared replay, then derive outcomes afterwards. A foreign replay file
 cannot accidentally be joined to this dataset because it is not an input.
 An input hash demonstrates identity, not that a provider made the values
@@ -83,7 +83,7 @@ returns are deliberately excluded until entry timing and venue evidence are
 correct. Overlapping horizons are dependent; this release supplies no IID
 confidence intervals, significance tests, annualized Sharpe or optimizer.
 
-The as-of audit rejects future derivative rows and future receipt timestamps.
+The shared as-of validator rejects future derivative rows, events and receipt timestamps and requires matching provenance. See `ASOF_CONTRACT.md` for required inputs and the scheduled open-candle exception.
 It cannot prove 5m endpoint interval semantics, synchronization with the 15m
 bar, publication delay, revisions or payload venue identity. Provider contract
 validation is the next prerequisite for real evidence.
@@ -94,3 +94,4 @@ evaluation, preserve all trials, use disjoint/purged time windows and add
 dependence-aware uncertainty only when there is a meaningful sample. Keep the
 output exploratory until execution truth and a user comparison support stronger
 claims. See `PRODUCT_DIRECTION.md` for the separate process-benefit experiment.
+
