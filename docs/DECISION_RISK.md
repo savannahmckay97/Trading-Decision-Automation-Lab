@@ -95,3 +95,7 @@ trade proposals.
 4. **Build the full RiskGovernor** (account equity, heat, breakers, sizing via
    `risk.maximum_quantity`) only once step 3 shows trade proposals reliable
    enough to govern. Live order submission remains out of scope throughout.
+
+   *Update 2026-10-11:* the owner chose to build a **paper-only** governor now,
+   ahead of step 3; see `docs/RISK_GOVERNOR.md`. Governing anything beyond
+   paper still requires step 3.

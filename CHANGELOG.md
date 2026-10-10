@@ -25,6 +25,13 @@ PR #5 review fixes: preserve supported manifest versions and source metadata thr
 
 All versions belong only to the independent **Trading Decision Automation Lab** project.
 
+## Unreleased — paper-only RiskGovernor
+
+- Add `market_observer/governor.py`: owner-chosen paper parameters ($1,000 account, 0.5% risk per trade, 2% daily loss or 3-loss breaker, one position, no leverage, kill switch), every failed check reported, unknown costs block.
+- Protective stop separate from setup invalidation: exit on a completed close below invalidation, plus an emergency stop 0.5 breakout-ATR below it; size computed on the emergency-stop distance plus costs.
+- Governed paper replay CLI with an immutable, deterministic journal artifact. `execution_permission` is always `NONE`; no live path.
+- 13 tests. Exploratory backfill plumbing check: modelled costs averaged 50% of the risk budget at assumed taker fees. See `docs/RISK_GOVERNOR.md`.
+
 ## Unreleased — historical ingestion and persisted snapshot boundary
 
 - Add bounded offline Binance USD-M 15m source-envelope ingestion and a synthetic runnable example.
