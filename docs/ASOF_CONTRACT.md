@@ -13,8 +13,12 @@ wraps failures as `EvaluationError` instead of producing a partial report.
 
 - Observation/exchange, receipt and consumed derivative-row timestamps must be
   non-negative integers. Boolean, float and string coercions are forbidden.
-- Exchange time, receipts and derivative event/row times cannot exceed
-  `observed_at_ms`; equality is allowed. There is no silent clock-skew allowance.
+- Exchange time, envelope event timestamps and receipts cannot exceed
+  `observed_at_ms`; equality is allowed. Supplied series rows cannot exceed
+  `exchange_time_ms`, even if received later. There is no silent clock-skew allowance.
+- Saved-snapshot decoding uses these same boundaries. Concurrent ticker updates
+  and Kraken receipt-based events may follow the exchange clock sample while
+  remaining available by observation time. See [saved replay verification](SAVED_SNAPSHOT_REPLAY.md).
 - Required public endpoint provenance and non-empty OI/taker series are required.
 - Funding and positioning remain optional, but supplied rows need matching
   endpoint provenance and valid as-of timestamps.
