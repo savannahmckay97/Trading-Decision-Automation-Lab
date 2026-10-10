@@ -104,12 +104,8 @@ and are recorded with every replay.
   "gross_reward": {"distance": "…", "bps_of_reference": "…", "atr": "…"},
   "gross_opportunity_to_risk": "…",  // gross reward ÷ gross stop distance
   "ratio_basis": "GROSS_PRICE_DISTANCES_NO_COSTS",
-  "cost_assumptions": {
-    "executable_spread_bps": {"value": "…", "status": "OBSERVED_SIGNAL_TIME_PROXY"},
-    "fee_bps_per_side":      {"value": null, "status": "NOT_SUPPLIED"},
-    "slippage_bps_per_side": {"value": null, "status": "NOT_SUPPLIED"},
-    "funding":               {"status": "NOT_MODELLED"}
-  },
+  // costs: reuse the sibling risk.costs block (spread / fees / slippage /
+  // funding with separate statuses); not duplicated here.
   "cost_adjusted_opportunity_to_risk": null,
   "cost_adjusted_basis": "UNAVAILABLE_FEES_OR_SLIPPAGE_NOT_SUPPLIED"
 }

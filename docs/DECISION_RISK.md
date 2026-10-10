@@ -1,4 +1,4 @@
-# Decision risk contract (`decision_risk/0.1`)
+# Decision risk contract (`decision_risk/0.2`)
 
 Every live (`market_decision/0.3`) and replay (`replay_decision/0.2`) decision
 now carries a `risk` object, produced by `market_observer/decision_risk.py`
@@ -35,10 +35,25 @@ otherwise be derived from inputs that failed a gate.
   paper simulator exits on an intrabar low touch instead; the record states this
   so the two meanings are not conflated.
 - `per_unit_risk`: distance from reference to invalidation in research quote
-  units (USDT), in bps of reference and in breakout ATRs; the signal-time Kraken
-  spread in bps as a round-trip cost proxy; and their bps sum. Fees, slippage,
-  funding and gap-through are excluded and listed in `not_included`.
+  units (USDT), in bps of reference and in breakout ATRs, plus
+  `distance_plus_modelled_costs_bps` when every modelled cost is known.
   `gap_loss_bounded` is always `false`.
+- `costs`: each component kept separate, with its own status:
+  - `spread`: signal-time Kraken quote, round-trip bps (`OBSERVED_SIGNAL_TIME_PROXY`);
+  - `fees`, `slippage`: per-side bps from `ObserverConfig.fee_bps_per_side` /
+    `slippage_bps_per_side` (observer CLI `--fee-bps-per-side`,
+    `--slippage-bps-per-side`). Unset means `NOT_SUPPLIED`, **never zero**; an
+    explicit `0` is a `CONFIGURED_ASSUMPTION`;
+  - `funding`: always `NOT_MODELLED`.
+
+  `modelled_round_trip_bps = spread + 2 × fee + 2 × slippage`, matching the
+  paper simulator (half spread plus per-side fee/slippage on each leg), and only
+  when all three are known; otherwise it is `null` and `modelled_basis` names
+  what is missing (e.g. `INCOMPLETE_MISSING_FEES_SLIPPAGE`). It is additive bps,
+  excludes funding and gap-through, and is never labelled net. The cost
+  assumptions are part of `ObserverConfig.public_dict()` and so of the
+  replay `configuration_id`. Replay CLI flags wait for the PR #2/#3/#5
+  integration because `replay.py` is under reconciliation.
 - `setup_window.last_evaluable_close_time_ms`: last completed close at which the
   setup can still qualify (breakout close + `expiry_bars` intervals), or the
   current close once `LONG_ELIGIBLE` (terminal).
@@ -67,8 +82,8 @@ trade proposals.
      causal arrival price needs the observation-time fix noted in
      `PRODUCT_DIRECTION.md` (paper entry vs `observed_at_ms`);
    - invalidation and stop distance — present (`invalidation`, `per_unit_risk`);
-   - estimated costs — partial: Kraken spread proxy only; fee and slippage must
-     be explicit caller-supplied inputs, never silent defaults;
+   - estimated costs — spread observed; fee and slippage configurable and
+     reported `NOT_SUPPLIED` when unset (never zero); funding not modelled;
    - available reward — absent (`NOT_DEFINED_BY_STRATEGY`). A target definition
      must be chosen and frozen *before* examining outcomes, then reward and
      reward/risk follow mechanically.

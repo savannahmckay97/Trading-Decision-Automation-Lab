@@ -162,7 +162,7 @@ The execution contract is deliberately conservative about what is known. Histori
 
 ## Decision risk contract
 
-Each decision includes a `risk` object stating the active setup's completed-close invalidation level, the per-unit distance to it at the research venue, and the Kraken spread as a cost proxy. It computes no quantity and grants no permission; blocked or setup-less cycles withhold figures. See `docs/DECISION_RISK.md`.
+Each decision includes a `risk` object stating the active setup's completed-close invalidation level, the per-unit distance to it at the research venue, and each cost component separately: observed Kraken spread, optional `--fee-bps-per-side` / `--slippage-bps-per-side` assumptions (reported as not supplied, never zero, when omitted) and unmodelled funding. It computes no quantity and grants no permission; blocked or setup-less cycles withhold figures. See `docs/DECISION_RISK.md`.
 
 ## Meaning of signals
 

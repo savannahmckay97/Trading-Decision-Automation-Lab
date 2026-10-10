@@ -15,7 +15,7 @@ from .config import ObserverConfig
 from .util import decimal
 
 
-RISK_CONTRACT_VERSION = "decision_risk/0.1"
+RISK_CONTRACT_VERSION = "decision_risk/0.2"
 TEN_THOUSAND = Decimal("10000")
 ACTIVE_SETUP_STATES = {"BREAKOUT_OBSERVED", "RETEST_PENDING", "LONG_ELIGIBLE"}
 BLOCKED_SIGNALS = {"DATA_STALE", "RISK_BLOCKED"}
@@ -23,7 +23,6 @@ BLOCKED_SIGNALS = {"DATA_STALE", "RISK_BLOCKED"}
 # Stated on every record so a consumer cannot mistake the figures for more.
 NOT_INCLUDED = [
     "account equity, quantity and portfolio heat",
-    "exchange fees and slippage",
     "funding and borrow",
     "gap or slippage through invalidation",
     "executable-venue (Kraken) stop price translation",
@@ -80,8 +79,11 @@ def assess_decision_risk(
 
     distance = reference - invalidation
     distance_bps = distance / reference * TEN_THOUSAND
-    spread = features.get("spread_bps")
-    spread_bps = decimal(spread) if spread is not None else None
+    try:
+        costs = _cost_assumptions(features.get("spread_bps"), config)
+    except ValueError as exc:
+        return {**base, "status": "UNAVAILABLE", "reason": f"invalid_cost_input: {exc}"}
+    modelled = costs["modelled_round_trip_bps"]
     if setup["state"] == "LONG_ELIGIBLE":
         last_evaluable_close_ms = close_time_ms
     else:
@@ -121,11 +123,10 @@ def assess_decision_risk(
             "distance_quote": config.research_quote,
             "distance_bps_of_reference": distance_bps,
             "distance_atr": distance / atr,
-            "executable_spread_bps": spread_bps,
-            "distance_plus_spread_bps": distance_bps + spread_bps if spread_bps is not None else None,
-            "spread_basis": "KRAKEN_SIGNAL_TIME_QUOTE_ROUND_TRIP_PROXY",
+            "distance_plus_modelled_costs_bps": distance_bps + modelled if modelled is not None else None,
             "gap_loss_bounded": False,
         },
+        "costs": costs,
         "setup_window": {
             "breakout_close_time_ms": breakout_close_ms,
             "bars_since_breakout": bars_since,
@@ -133,3 +134,48 @@ def assess_decision_risk(
         },
         "reward_reference": "NOT_DEFINED_BY_STRATEGY",
     }
+
+
+def _cost_assumptions(spread: Any, config: ObserverConfig) -> dict[str, Any]:
+    """Keep each cost component separate; never treat an unknown as zero.
+
+    Conventions match market_observer.paper: the spread is a round-trip proxy
+    (half per side) and fee/slippage are per side, so a round trip pays each
+    twice. The modelled total exists only when every modelled component is
+    known, and it always excludes funding and gap-through.
+    """
+
+    spread_bps = decimal(spread) if spread is not None else None
+    if spread_bps is not None and spread_bps < 0:
+        raise ValueError("negative spread")
+
+    def per_side(value: Any, source: str) -> dict[str, Any]:
+        if value is None:
+            return {"per_side_bps": None, "round_trip_bps": None, "status": "NOT_SUPPLIED"}
+        amount = decimal(value)
+        if amount < 0:
+            raise ValueError(f"negative {source}")
+        return {"per_side_bps": amount, "round_trip_bps": amount * 2, "status": "CONFIGURED_ASSUMPTION"}
+
+    components = {
+        "spread": {
+            "round_trip_bps": spread_bps,
+            "status": "OBSERVED_SIGNAL_TIME_PROXY" if spread_bps is not None else "UNAVAILABLE",
+            "basis": "KRAKEN_QUOTE_AT_SIGNAL_TIME",
+        },
+        "fees": per_side(config.fee_bps_per_side, "fee"),
+        "slippage": per_side(config.slippage_bps_per_side, "slippage"),
+        "funding": {"status": "NOT_MODELLED"},
+    }
+    missing = [
+        name
+        for name in ("spread", "fees", "slippage")
+        if components[name]["round_trip_bps"] is None
+    ]
+    if missing:
+        total = None
+        basis = "INCOMPLETE_MISSING_" + "_".join(name.upper() for name in missing)
+    else:
+        total = sum(components[name]["round_trip_bps"] for name in ("spread", "fees", "slippage"))
+        basis = "SPREAD_FEES_SLIPPAGE_ADDITIVE_BPS_EXCLUDES_FUNDING_AND_GAP"
+    return {**components, "modelled_round_trip_bps": total, "modelled_basis": basis}

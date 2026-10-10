@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from decimal import Decimal
 
 from market_observer.config import ObserverConfig
@@ -67,14 +68,57 @@ class DecisionRiskTests(unittest.TestCase):
             second.completed_candle_close_time_ms,
         )
 
-    def test_executable_spread_is_reported_in_bps_beside_research_distance(self):
-        risk = evaluate_snapshot(snapshot("breakout"), self.config, None).risk["per_unit_risk"]
-        self.assertGreater(risk["executable_spread_bps"], 0)
+    def test_unknown_fee_and_slippage_are_not_zero(self):
+        risk = evaluate_snapshot(snapshot("breakout"), self.config, None).risk
+        costs = risk["costs"]
+        self.assertGreater(costs["spread"]["round_trip_bps"], 0)
+        self.assertEqual(costs["spread"]["status"], "OBSERVED_SIGNAL_TIME_PROXY")
+        for name in ("fees", "slippage"):
+            self.assertEqual(costs[name]["status"], "NOT_SUPPLIED")
+            self.assertIsNone(costs[name]["per_side_bps"])
+        self.assertEqual(costs["funding"]["status"], "NOT_MODELLED")
+        self.assertIsNone(costs["modelled_round_trip_bps"])
+        self.assertEqual(costs["modelled_basis"], "INCOMPLETE_MISSING_FEES_SLIPPAGE")
+        self.assertIsNone(risk["per_unit_risk"]["distance_plus_modelled_costs_bps"])
+        self.assertFalse(risk["per_unit_risk"]["gap_loss_bounded"])
+
+    def test_one_supplied_cost_still_leaves_total_incomplete(self):
+        config = replace(self.config, fee_bps_per_side=5)
+        costs = evaluate_snapshot(snapshot("breakout"), config, None).risk["costs"]
+        self.assertEqual(costs["fees"]["status"], "CONFIGURED_ASSUMPTION")
+        self.assertIsNone(costs["modelled_round_trip_bps"])
+        self.assertEqual(costs["modelled_basis"], "INCOMPLETE_MISSING_SLIPPAGE")
+
+    def test_explicit_zero_cost_is_distinct_from_unknown(self):
+        config = replace(self.config, fee_bps_per_side=0, slippage_bps_per_side=0)
+        costs = evaluate_snapshot(snapshot("breakout"), config, None).risk["costs"]
+        self.assertEqual(costs["fees"]["status"], "CONFIGURED_ASSUMPTION")
+        self.assertEqual(costs["modelled_round_trip_bps"], costs["spread"]["round_trip_bps"])
+
+    def test_supplied_costs_follow_paper_conventions_and_exclude_funding(self):
+        config = replace(self.config, fee_bps_per_side=5, slippage_bps_per_side=2.5)
+        risk = evaluate_snapshot(snapshot("breakout"), config, None).risk
+        costs = risk["costs"]
+        self.assertEqual(costs["fees"]["round_trip_bps"], Decimal("10"))
+        self.assertEqual(costs["slippage"]["round_trip_bps"], Decimal("5.0"))
         self.assertEqual(
-            risk["distance_plus_spread_bps"],
-            risk["distance_bps_of_reference"] + risk["executable_spread_bps"],
+            costs["modelled_round_trip_bps"],
+            costs["spread"]["round_trip_bps"] + Decimal("15.0"),
         )
-        self.assertFalse(risk["gap_loss_bounded"])
+        self.assertIn("EXCLUDES_FUNDING", costs["modelled_basis"])
+        self.assertEqual(
+            risk["per_unit_risk"]["distance_plus_modelled_costs_bps"],
+            risk["per_unit_risk"]["distance_bps_of_reference"] + costs["modelled_round_trip_bps"],
+        )
+
+    def test_negative_or_nonfinite_cost_configuration_is_rejected(self):
+        for field, value in (("fee_bps_per_side", -1), ("slippage_bps_per_side", float("nan"))):
+            with self.assertRaises(ValueError):
+                replace(self.config, **{field: value}).validate()
+
+    def test_cost_assumptions_enter_configuration_identity(self):
+        config = replace(self.config, fee_bps_per_side=5)
+        self.assertNotEqual(config.public_dict(), self.config.public_dict())
 
     def test_no_active_setup_is_not_applicable(self):
         evaluation = evaluate_snapshot(snapshot("flat"), self.config, None)
