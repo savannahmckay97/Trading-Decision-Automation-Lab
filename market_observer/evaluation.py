@@ -17,7 +17,7 @@ from typing import Any, Iterable
 
 from .asof import AsOfError, validate_snapshot_asof
 from .config import ObserverConfig
-from .dataset import build_dataset_artifact
+from .dataset import DatasetError, validate_dataset_manifest
 from .outcomes import build_outcome_artifact, completed_candle_tape
 from .replay import ReplayRunner, load_jsonl_snapshots
 from .util import canonical_json, decimal, stable_id
@@ -71,9 +71,10 @@ def build_evaluation_artifact(
     source = manifest.get("source")
     if not isinstance(source, str) or not source.strip():
         raise EvaluationError("manifest source is required")
-    rows, rebuilt = build_dataset_artifact(snapshots, source=source)
-    if rebuilt != manifest:
-        raise EvaluationError("dataset manifest does not match normalized snapshots")
+    try:
+        rows, rebuilt = validate_dataset_manifest(snapshots, manifest)
+    except DatasetError as exc:
+        raise EvaluationError(str(exc)) from exc
     for index, snapshot in enumerate(rows):
         _audit_asof(snapshot, index)
 

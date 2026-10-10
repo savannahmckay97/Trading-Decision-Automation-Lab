@@ -1,4 +1,29 @@
-# Verification — shared as-of guard, 10 October 2026 (Melbourne)
+# Verification — integrated PR review fixes, 10 October 2026
+
+The combined branches contain 99 deterministic tests. Verification covers late-received outcome censoring, derivative continuity before live/replay features, strict persisted snapshot ranges/intervals/provenance, supported legacy manifest fingerprints, and imported source metadata through outcome/paper CLIs. Candle-only imports remain DATA_STALE/NO_ORDER; chronology is checked even for incomplete inputs.
+
+Specification validation passes: 21 rules, 49 raw/config fields, 18 derived fields. GitHub Actions must pass on Python 3.10 and 3.12 before merging. Synthetic fixtures establish plumbing and failure behavior; real provider integration and predictive benefit remain unverified.
+
+## Previous milestone evidence
+
+### Historical ingestion
+
+- **60/60 deterministic tests passed** on Python 3.12 in the implementation environment.
+- Specification validation passed: **21 rules, 49 raw/config fields, 18 derived fields**.
+- CLI source import → immutable JSONL/manifest → replay is tested with synthetic data.
+- Full breakout/retest fixtures preserve complete results through both JSONL and SQLite; signals remain `WATCH_LONG` then `LONG_ELIGIBLE`.
+- Candle-only imports remain `DATA_STALE`/`NO_ORDER`, including after 97-bar warmup.
+- Tests reject wrong identity/units/interval, malformed values, gaps, duplicates, reversed order, truncated coverage, future bars and nested research results.
+- Determinism, immutable outputs and competing-writer file preservation are tested.
+- Independent secondary review confirmed the original failures and found no blocking issues in the implementation. Its first patch pass independently ran the then-current 58 tests; two additional immutable-write tests brought the suite to 60.
+- An actual Binance public historical-kline request returned **HTTP 451**. This is a verification limit: no successful real-export or live-provider integration is claimed.
+
+Run `python -m unittest discover -s tests -v` and `python spec/validate_specifications.py` from the repository root. CI remains configured for Python 3.10 and 3.12; local execution alone does not establish a remote CI result.
+
+No live orders, credentials, prediction-performance claims or RiskGovernor changes are part of this milestone. See `docs/HISTORICAL_INGESTION_V0_1.md` for exact contracts and remaining work.
+
+## Earlier verification — project zero v0.2
+### Shared as-of guard
 
 - **68/68 deterministic unit/integration tests passed locally on Python 3.12.14.**
 - Machine specifications validated: **21 rules, 49 raw/config fields, 18 derived fields.**

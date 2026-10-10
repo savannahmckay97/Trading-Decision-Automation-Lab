@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
-from .dataset import build_dataset_artifact
+from .dataset import DatasetError, validate_dataset_manifest
 from .replay import load_jsonl_snapshots
 from .util import canonical_json, decimal, stable_id
 
@@ -302,11 +302,10 @@ def main(argv: list[str] | None = None) -> int:
         raise OutcomeLabelError("dataset manifest is missing source or dataset_id")
 
     snapshots = list(load_jsonl_snapshots(args.jsonl))
-    rows, rebuilt_manifest = build_dataset_artifact(snapshots, source=str(source))
-    if rebuilt_manifest["dataset_id"] != expected_dataset_id:
-        raise OutcomeLabelError("dataset manifest does not match snapshot JSONL")
-    if rebuilt_manifest["jsonl_sha256"] != manifest.get("jsonl_sha256"):
-        raise OutcomeLabelError("dataset manifest hash does not match snapshot JSONL")
+    try:
+        rows, rebuilt_manifest = validate_dataset_manifest(snapshots, manifest)
+    except DatasetError as exc:
+        raise OutcomeLabelError(str(exc)) from exc
 
     replay_result = _read_json_object(args.replay, "replay result")
     try:

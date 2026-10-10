@@ -21,10 +21,11 @@ from .config import ObserverConfig
 from .engine import default_setup_state
 from .evaluator import evaluate_snapshot
 from .features import FeatureError, calculate_features
-from .util import canonical_json, decimal, stable_id
+from .snapshots import SnapshotError, decode_snapshot, load_snapshot_json
+from .util import canonical_json, stable_id
 
 
-REPLAY_VERSION = "trading-decision-lab-replay-0.2.0"
+REPLAY_VERSION = "trading-decision-lab-replay-0.3.0"
 
 
 class ReplayError(ValueError):
@@ -39,39 +40,12 @@ def load_jsonl_snapshots(path: str | Path) -> Iterator[dict[str, Any]]:
             if not line.strip():
                 continue
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
+                value = load_snapshot_json(line)
+            except (json.JSONDecodeError, SnapshotError) as exc:
                 raise ReplayError(f"invalid JSON on line {line_number}: {exc}") from exc
             if not isinstance(value, dict):
                 raise ReplayError(f"line {line_number}: snapshot must be an object")
-            try:
-                yield _restore_snapshot_decimals(value)
-            except (TypeError, ValueError, AttributeError) as exc:
-                raise ReplayError(f"line {line_number}: invalid normalized numeric input: {exc}") from exc
-
-
-def _restore_snapshot_decimals(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Restore the Decimal values encoded as strings by canonical_json.
-
-    Decode only declared numeric fields; timestamps, identities, provenance and
-    missing values retain their meaning. Both persisted input routes use this
-    boundary so saved snapshots evaluate like in-memory normalized snapshots.
-    """
-    groups = [
-        ([snapshot.get("market", {})], ("binance_last_price", "kraken_last_price", "kraken_bid_price", "kraken_ask_price")),
-        (snapshot.get("candles_15m", []), ("open", "high", "low", "close", "volume")),
-        (snapshot.get("open_interest_5m", []), ("open_interest", "open_interest_value")),
-        (snapshot.get("taker_flow_5m", []), ("buy_volume", "sell_volume")),
-        (snapshot.get("funding_history", []), ("rate",)),
-    ]
-    groups.extend((rows, ("long_share", "short_share", "long_short_ratio"))
-                  for rows in snapshot.get("positioning", {}).values())
-    for rows, fields in groups:
-        for row in rows:
-            for field in fields:
-                if row.get(field) is not None:
-                    row[field] = decimal(row[field])
-    return snapshot
+            yield value
 
 
 def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) -> Iterator[dict[str, Any]]:
@@ -95,13 +69,13 @@ def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) 
             params = (research_symbol,)
         query += " ORDER BY observed_at_ms, rowid"
         for (payload_json,) in db.execute(query, params):
-            value = json.loads(payload_json)
+            try:
+                value = load_snapshot_json(payload_json)
+            except (json.JSONDecodeError, SnapshotError) as exc:
+                raise ReplayError(f"invalid stored snapshot: {exc}") from exc
             if not isinstance(value, dict):
                 raise ReplayError("stored normalized snapshot is not an object")
-            try:
-                yield _restore_snapshot_decimals(value)
-            except (TypeError, ValueError, AttributeError) as exc:
-                raise ReplayError(f"invalid stored normalized numeric input: {exc}") from exc
+            yield value
     finally:
         db.close()
 
@@ -119,20 +93,29 @@ class ReplayRunner:
         gaps: list[dict[str, Any]] = []
         previous_close_time: int | None = None
         previous_observed_at: int | None = None
+        previous_exchange_time: int | None = None
         signal_counts: Counter[str] = Counter()
         sequence_counts: Counter[str] = Counter()
 
         for index, original in enumerate(snapshots):
             snapshot = deepcopy(original)
             self._validate_identity(snapshot, index)
+            observed_at = snapshot.get("observed_at_ms")
+            exchange_time = snapshot.get("exchange_time_ms")
+            if type(observed_at) is int:
+                if previous_observed_at is not None and observed_at < previous_observed_at:
+                    raise ReplayError(f"snapshot {index}: observed_at_ms moved backwards; input must be chronological")
+                previous_observed_at = observed_at
+            if type(exchange_time) is int:
+                if previous_exchange_time is not None and exchange_time < previous_exchange_time:
+                    raise ReplayError(f"snapshot {index}: exchange_time_ms moved backwards")
+                previous_exchange_time = exchange_time
             try:
                 validate_snapshot_asof(snapshot)
-                observed_at = snapshot["observed_at_ms"]
-                if previous_observed_at is not None and observed_at < previous_observed_at:
-                    raise ReplayError(
-                        f"snapshot {index}: observed_at_ms moved backwards; input must be chronological"
-                    )
-                previous_observed_at = observed_at
+                try:
+                    snapshot = decode_snapshot(snapshot, require_complete=True)
+                except SnapshotError as exc:
+                    raise ReplayError(f"snapshot {index}: {exc}") from exc
                 features = calculate_features(snapshot, self.config)
                 close_time = int(features["completed_candle_close_time_ms"])
                 sequence = sequence_status(previous_close_time, close_time, self.config.interval_ms)
@@ -361,4 +344,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

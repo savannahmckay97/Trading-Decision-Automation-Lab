@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from market_observer.config import ObserverConfig
-from market_observer.dataset import build_dataset_artifact, write_dataset
+from market_observer.dataset import DatasetError, build_dataset_artifact, write_dataset
 from market_observer.evaluation import (
     EvaluationConfig, EvaluationError, build_evaluation_artifact, main,
     write_evaluation_artifact,
@@ -143,11 +143,11 @@ class DecisionEvaluationTests(unittest.TestCase):
             with self.subTest(name=name):
                 rows = copy.deepcopy(self.rows)
                 rows[0][name][-1]["timestamp_ms"] = rows[0]["observed_at_ms"] + 1
-                with self.assertRaisesRegex(EvaluationError, "future input"):
+                with self.assertRaisesRegex((EvaluationError, DatasetError), "future input"):
                     self.evaluate(rows)
         rows = copy.deepcopy(self.rows)
         rows[0]["provenance"]["kraken_ticker"]["received_time_ms"] += 1
-        with self.assertRaisesRegex(EvaluationError, "future receipt"):
+        with self.assertRaisesRegex((EvaluationError, DatasetError), "future receipt"):
             self.evaluate(rows)
 
     def test_manifest_binding_rejects_changed_data_and_metadata(self):
@@ -166,7 +166,7 @@ class DecisionEvaluationTests(unittest.TestCase):
                 else:
                     del rows[0]["provenance"]["binance_global_ratio"]
                     reason = "missing provenance"
-                with self.assertRaisesRegex(EvaluationError, reason):
+                with self.assertRaisesRegex((EvaluationError, DatasetError), reason):
                     self.evaluate(rows)
 
     def test_blocked_observations_do_not_enter_any_selection_baseline(self):
