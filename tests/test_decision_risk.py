@@ -191,6 +191,15 @@ class DecisionRiskTests(unittest.TestCase):
         self.assertEqual(decision["signal"], "DATA_STALE")
         self.assertEqual(decision["risk"]["status"], "WITHHELD_BLOCKED")
 
+    def test_asof_rejection_carries_withheld_risk(self):
+        future = snapshot("breakout")
+        future["exchange_time_ms"] = future["observed_at_ms"] + 1
+        result = ReplayRunner(self.config).run([future])
+        decision = result["decisions"][0]
+        self.assertEqual(decision["sequence"]["status"], "ASOF_INVALID")
+        self.assertEqual(decision["risk"]["status"], "WITHHELD_BLOCKED")
+        self.assertNotIn("invalidation", decision["risk"])
+
 
 if __name__ == "__main__":
     unittest.main()

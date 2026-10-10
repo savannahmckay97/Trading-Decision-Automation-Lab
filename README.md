@@ -198,12 +198,15 @@ See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigatio
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 99 tests covering live/replay guards,
-persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
+The integrated deterministic suite includes 116 tests covering live/replay guards, the
+per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
 manifest compatibility, outcome/paper workflows and descriptive evaluation.
 GitHub Actions runs the suite plus specification validation on Python 3.10 and
-3.12. The ingestion implementation's Binance request returned HTTP 451;
-successful live provider integration remains unverified. No credential is used
+3.12. The ingestion implementation's Binance request returned HTTP 451. A
+later live probe from another network reached both providers, but found the
+live observer can only emit `DATA_STALE` because the 5m taker/OI freshness
+limits cannot be met (issue #7); successful live decision output remains
+unverified. No credential is used
 and no order route exists.
 
 Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.
