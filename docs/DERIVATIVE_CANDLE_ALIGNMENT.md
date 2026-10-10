@@ -33,11 +33,11 @@ this is an intentional correctness change. No values, state, credentials or
 thresholds were adopted from other projects. This change addresses findings 1–3
 in [issue #7](https://github.com/savannahmckay97/Trading-Decision-Automation-Lab/issues/7).
 The original evidence is in PR #6's `docs/LIVE_VERIFICATION_REPORT.md`; PR #6
-was not merged into this branch.
+has since merged into main; this branch integrates current main.
 
 ## Verification
 
-105 unit tests pass, including 194/444/777-second post-close polling, missing
+154 unit tests pass, including 194/444/777-second post-close polling, missing
 publication followed by arrival, restart/idempotence, later rows with opposing
 flow, missing/duplicate/shifted windows, invalid values, stale receipts, and
 missing latest candles. Specification validation passes.

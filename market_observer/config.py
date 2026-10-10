@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,14 @@ class ObserverConfig:
     minimum_breakout_quality: int = 1
     minimum_retest_buy_share: float = 0.50
     expiry_bars: int = 6
+    # Cost assumptions for the per-decision risk contract. None means unknown,
+    # never zero; the contract then reports the component as NOT_SUPPLIED.
+    fee_bps_per_side: float | None = None
+    slippage_bps_per_side: float | None = None
+    # Descriptive reward reference (docs/REWARD_REFERENCE.md). Fixed a priori;
+    # never tuned against outcomes.
+    reward_pivot_confirmation_bars: int = 2
+    reward_search_bars: int = 144
     mode: str = "observation_only"
 
     @property
@@ -52,6 +61,20 @@ class ObserverConfig:
             raise ValueError("minimum_retest_buy_share must be between zero and one")
         if min(self.max_cross_venue_divergence_bps, self.max_spread_bps) <= 0:
             raise ValueError("spread and divergence limits must be positive")
+        if self.reward_pivot_confirmation_bars < 1:
+            raise ValueError("reward_pivot_confirmation_bars must be at least 1")
+        if not 2 * self.reward_pivot_confirmation_bars + 1 <= self.reward_search_bars <= self.candle_limit - 1:
+            raise ValueError("reward_search_bars must fit a pivot and the completed candles fetched")
+        for name in ("fee_bps_per_side", "slippage_bps_per_side"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            try:
+                cost = Decimal(str(value))
+            except InvalidOperation as exc:
+                raise ValueError(f"{name} must be a number") from exc
+            if not cost.is_finite() or cost < 0:
+                raise ValueError(f"{name} must be finite and non-negative")
 
     def public_dict(self) -> dict:
         data = asdict(self)

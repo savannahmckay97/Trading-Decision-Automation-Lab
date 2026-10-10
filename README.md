@@ -118,6 +118,8 @@ python -m market_observer.replay \
   --output results/tao_replay.json
 ```
 
+Add `--fee-bps-per-side` and `--slippage-bps-per-side` to record cost assumptions in each decision's `risk` contract, as for the observer. Omitted costs are reported as not supplied, never zero, and the assumptions are part of the replay `configuration_id`.
+
 Replay input must already be chronological and must preserve the data actually available at each historical instant. The runner rejects reversed chronology, records duplicate and missing completed bars, resets an active setup across a detected gap, and refuses to overwrite a prior result file.
 
 JSONL and SQLite loaders restore declared decimal fields exactly. Dataset and
@@ -160,6 +162,10 @@ python -m market_observer.paper \
 
 The execution contract is deliberately conservative about what is known. Historical candles currently come from Binance USD-M research data, not a historical Kraken execution tape, so every fill records `executable_venue_validated: false`. Funding, order-book depth, latency, partial fills, queue position and liquidity impact remain unmodeled. The artifact reports per-unit hypothetical execution results only; it does not size positions, compound equity, authorize trades or make a strategy-performance claim.
 
+## Decision risk contract
+
+Each decision includes a `risk` object stating the active setup's completed-close invalidation level, the per-unit distance to it at the research venue, and each cost component separately: observed Kraken spread, optional `--fee-bps-per-side` / `--slippage-bps-per-side` assumptions (reported as not supplied, never zero, when omitted) and unmodelled funding. It also reports a descriptive reward reference, the nearest confirmed overhead swing high, with a gross opportunity-to-risk ratio, or `TARGET_UNAVAILABLE` (see `docs/REWARD_REFERENCE.md`); it is not a take-profit and never affects eligibility. It computes no quantity and grants no permission; blocked or setup-less cycles withhold figures. See `docs/DECISION_RISK.md`.
+
 ## Meaning of signals
 
 | Signal | Meaning |
@@ -190,17 +196,19 @@ python -m market_observer.evaluation \
 
 Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Derivative windows now use exact completed-candle boundaries; broader provider timing semantics and real user benefit still require validation.
 
+Evaluation 0.2 also labels each TDAL selection by whether its reward reference or its invalidation is reached first. See [evaluation readiness](docs/EVALUATION_READINESS.md) for why no real dataset can yet produce TDAL selections, and the measured setup frequency.
+
 See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigation and direction](docs/PRODUCT_DIRECTION.md).
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 105 tests covering live/replay guards,
-persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
-manifest compatibility, outcome/paper workflows and descriptive evaluation.
-GitHub Actions runs the suite plus specification validation on Python 3.10 and
-3.12. The ingestion implementation's Binance request returned HTTP 451;
-issue #7 now has a successful read-only live provider check and exact derivative
-candle alignment (see [contract and live evidence](docs/DERIVATIVE_CANDLE_ALIGNMENT.md)). No credential is used
+The integrated deterministic suite includes 154 tests covering live/replay guards,
+the per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion,
+immutable datasets, legacy manifest compatibility, outcome/paper workflows and
+descriptive evaluation. GitHub Actions runs the suite plus specification validation
+on Python 3.10 and 3.12. The ingestion implementation's Binance request returned
+HTTP 451; issue #7 now has a successful read-only live provider check and exact
+derivative candle alignment (see [contract and live evidence](docs/DERIVATIVE_CANDLE_ALIGNMENT.md)). No credential is used
 and no order route exists.
 
 Next expand provider timing/identity validation and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.

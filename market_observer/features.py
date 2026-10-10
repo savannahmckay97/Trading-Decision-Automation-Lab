@@ -77,23 +77,32 @@ def calculate_features(snapshot: dict[str, Any], config: ObserverConfig) -> dict
 
 
 def _completed_candles(snapshot: dict[str, Any], config: ObserverConfig) -> list[dict[str, Any]]:
-    exchange_time = int(snapshot["exchange_time_ms"])
-    rows = sorted(
-        (row for row in snapshot.get("candles_15m", []) if int(row["close_time_ms"]) < exchange_time),
-        key=lambda row: int(row["open_time_ms"]),
-    )
+    rows = completed_candle_rows(snapshot)
     required = max(config.volume_lookback_candles + 1, config.level_lookback_candles + 1, config.atr_period + 1)
     if len(rows) < required:
         raise FeatureError(f"insufficient completed candles: need {required}, got {len(rows)}")
     rows = rows[-required:]
+    validate_candle_window(rows, config.interval_ms)
+    return rows
+
+
+def completed_candle_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Completed candles only (close before exchange time), oldest first, unvalidated."""
+    exchange_time = int(snapshot["exchange_time_ms"])
+    return sorted(
+        (row for row in snapshot.get("candles_15m", []) if int(row["close_time_ms"]) < exchange_time),
+        key=lambda row: int(row["open_time_ms"]),
+    )
+
+
+def validate_candle_window(rows: list[dict[str, Any]], interval_ms: int) -> None:
     for previous, current in zip(rows, rows[1:]):
-        if int(current["open_time_ms"]) - int(previous["open_time_ms"]) != config.interval_ms:
+        if int(current["open_time_ms"]) - int(previous["open_time_ms"]) != interval_ms:
             raise FeatureError("missing or duplicate candle in feature window")
     for row in rows:
         o, h, low, close, volume = (row[key] for key in ("open", "high", "low", "close", "volume"))
         if min(o, h, low, close) <= ZERO or volume < ZERO or not low <= min(o, close) <= max(o, close) <= h:
             raise FeatureError("invalid OHLCV candle")
-    return rows
 
 
 def wilder_atr(candles: list[dict[str, Any]], period: int) -> Decimal:

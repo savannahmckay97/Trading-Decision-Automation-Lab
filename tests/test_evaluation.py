@@ -228,3 +228,121 @@ class DecisionEvaluationTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+from market_observer.evaluation import _first_touch, _first_touch_summary
+
+
+def bar(high, low, close):
+    return {"high": Decimal(str(high)), "low": Decimal(str(low)), "close": Decimal(str(close))}
+
+
+def risk(target="110", stop="95", ratio="2"):
+    return {
+        "status": "AVAILABLE",
+        "invalidation": {"level": Decimal(stop)},
+        "reward_reference": {"status": "AVAILABLE", "level": Decimal(target),
+                             "gross_opportunity_to_risk": Decimal(ratio)},
+    }
+
+
+AVAILABLE = {"status": "AVAILABLE"}
+
+
+class RewardFirstTouchTests(unittest.TestCase):
+    def test_heterogeneous_ratios_use_mean_ratio_breakeven_and_realized_r(self):
+        rows = [{"reward_first_touch": item} for item in (
+            _first_touch(risk(ratio="0.5"), AVAILABLE, [bar(111, 100, 105)]),
+            _first_touch(risk(ratio="4"), AVAILABLE, [bar(100, 94, 94)]),
+            _first_touch(risk(ratio="0.5"), AVAILABLE, [bar(100, 94, 94)]),
+        )]
+        close = _first_touch_summary(rows)["close_stop"]
+        self.assertEqual(close["breakeven_target_rate_at_mean_ratio"], Decimal(1) / (1 + Decimal(5) / 3))
+        self.assertEqual(close["realized_gross_r_of_decided"], Decimal("-1.5"))
+        self.assertNotIn("mean_breakeven_target_rate_of_decided", close)
+
+    def test_target_first(self):
+        result = _first_touch(risk(), AVAILABLE, [bar(105, 100, 104), bar(111, 103, 109)])
+        self.assertEqual(result["wick_stop"], {"result": "TARGET_FIRST", "bars": 2})
+        self.assertEqual(result["close_stop"], {"result": "TARGET_FIRST", "bars": 2})
+
+    def test_stop_first(self):
+        result = _first_touch(risk(), AVAILABLE, [bar(101, 94, 94.5), bar(112, 94, 111)])
+        self.assertEqual(result["wick_stop"], {"result": "STOP_FIRST", "bars": 1})
+        self.assertEqual(result["close_stop"], {"result": "STOP_FIRST", "bars": 1})
+
+    def test_same_bar_is_ambiguous_for_wick_but_ordered_for_close(self):
+        result = _first_touch(risk(), AVAILABLE, [bar(111, 94, 94)])
+        self.assertEqual(result["wick_stop"]["result"], "AMBIGUOUS_SAME_BAR")
+        # A close-based stop can only happen at the close, after the intrabar touch.
+        self.assertEqual(result["close_stop"], {"result": "TARGET_FIRST", "bars": 1})
+
+    def test_wick_and_close_rules_can_disagree(self):
+        result = _first_touch(risk(), AVAILABLE, [bar(100, 94, 99), bar(110, 98, 109)])
+        self.assertEqual(result["wick_stop"], {"result": "STOP_FIRST", "bars": 1})
+        self.assertEqual(result["close_stop"], {"result": "TARGET_FIRST", "bars": 2})
+
+    def test_neither_within_horizon(self):
+        result = _first_touch(risk(), AVAILABLE, [bar(105, 96, 100)])
+        self.assertEqual(result["wick_stop"], {"result": "NEITHER_WITHIN_HORIZON", "bars": None})
+
+    def test_missing_target_risk_or_path_is_never_scored(self):
+        no_target = risk()
+        no_target["reward_reference"] = {"status": "TARGET_UNAVAILABLE", "reason": "X"}
+        self.assertEqual(_first_touch(no_target, AVAILABLE, [bar(200, 1, 100)])["status"], "TARGET_UNAVAILABLE")
+        self.assertEqual(_first_touch({"status": "WITHHELD_BLOCKED"}, AVAILABLE, None)["status"], "RISK_UNAVAILABLE")
+        censored = {"status": "CENSORED", "reason": "horizon_exceeds_evaluation_window"}
+        self.assertEqual(_first_touch(risk(), censored, None)["status"], "CENSORED")
+
+    def test_summary_compares_target_rate_with_breakeven_on_decided_cases(self):
+        rows = [{"reward_first_touch": item} for item in (
+            _first_touch(risk(ratio="1"), AVAILABLE, [bar(111, 100, 105)]),
+            _first_touch(risk(ratio="3"), AVAILABLE, [bar(100, 94, 94)]),
+            _first_touch(risk(), AVAILABLE, [bar(111, 94, 94)]),
+            _first_touch(risk(), AVAILABLE, [bar(105, 96, 100)]),
+            {"status": "TARGET_UNAVAILABLE", "reason": "X"},
+        )] + [{"reward_first_touch": None}]
+        summary = _first_touch_summary(rows)
+        self.assertEqual(summary["selected_count"], 5)
+        self.assertEqual(summary["status_counts"], {"LABELED": 4, "TARGET_UNAVAILABLE": 1})
+        wick = summary["wick_stop"]
+        self.assertEqual(wick["decided_count"], 2)
+        self.assertEqual(wick["target_first_fraction_of_decided"], Decimal("0.5"))
+        # Ratios 1 and 3 on the decided cases: breakeven at mean ratio 2 is 1/3,
+        # not the mean of 1/2 and 1/4. Realized: +1R (target) - 1R (stop).
+        self.assertEqual(wick["breakeven_target_rate_at_mean_ratio"], Decimal(1) / 3)
+        self.assertEqual(wick["realized_gross_r_of_decided"], Decimal(0))
+        self.assertEqual(wick["mean_realized_gross_r_of_decided"], Decimal(0))
+        self.assertEqual(wick["result_counts"]["AMBIGUOUS_SAME_BAR"], 1)
+        self.assertEqual(summary["close_stop"]["decided_count"], 3)
+        self.assertEqual(summary["basis"], "GROSS_DESCRIPTIVE_NO_COSTS_NOT_EXPECTANCY")
+
+
+class RewardFirstTouchIntegrationTests(unittest.TestCase):
+    setUp = DecisionEvaluationTests.setUp
+    evaluate = DecisionEvaluationTests.evaluate
+
+    def test_artifact_labels_tdal_selection_against_reward_and_invalidation(self):
+        rows = snapshots()
+        for row in rows:
+            # Bar 2 sits outside every feature window; it only creates a confirmed overhead pivot.
+            row["candles_15m"][2]["high"] = Decimal("102.5")
+        result = self.evaluate(rows)
+        selected = [item for item in result["decisions"] if item["selected"]["TDAL"]]
+        self.assertEqual(len(selected), 1)
+        touch = selected[0]["reward_first_touch"]
+        self.assertEqual(touch["status"], "LABELED")
+        self.assertEqual(touch["target_level"], Decimal("102.5"))
+        self.assertEqual(touch["close_stop"], {"result": "TARGET_FIRST", "bars": 1})
+        future = rows[2]["candles_15m"][-2]
+        expected_wick = "AMBIGUOUS_SAME_BAR" if future["low"] <= touch["invalidation_level"] else "TARGET_FIRST"
+        self.assertEqual(touch["wick_stop"]["result"], expected_wick)
+        self.assertEqual(result["tdal_reward_first_touch"]["status_counts"], {"LABELED": 1})
+        # Eligibility is identical with or without the reward-only pivot.
+        plain = self.evaluate()
+        self.assertEqual([d["signal"] for d in plain["decisions"]], [d["signal"] for d in result["decisions"]])
+
+    def test_fixture_without_overhead_reports_target_unavailable(self):
+        result = self.evaluate()
+        self.assertEqual(result["tdal_reward_first_touch"]["status_counts"], {"TARGET_UNAVAILABLE": 1})
+        self.assertEqual(result["tdal_reward_first_touch"]["wick_stop"]["decided_count"], 0)
