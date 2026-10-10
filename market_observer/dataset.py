@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .util import canonical_json, stable_id
+from .snapshots import SnapshotError, decode_snapshot
 
 
-DATASET_VERSION = "trading-decision-lab-dataset-0.1.0"
+DATASET_VERSION = "trading-decision-lab-dataset-0.2.0"
 
 
 class DatasetError(ValueError):
@@ -20,15 +21,21 @@ class DatasetError(ValueError):
 
 
 def build_dataset_artifact(
-    snapshots: Iterable[dict[str, Any]], *, source: str
+    snapshots: Iterable[dict[str, Any]], *, source: str,
+    source_metadata: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate and fingerprint snapshots without sorting away chronology evidence."""
     rows: list[dict[str, Any]] = []
     previous_observed: int | None = None
+    previous_exchange: int | None = None
     identities: set[tuple[str, str]] = set()
     digest = hashlib.sha256()
 
     for index, snapshot in enumerate(snapshots):
+        try:
+            snapshot = decode_snapshot(snapshot)
+        except SnapshotError as exc:
+            raise DatasetError(f"snapshot {index}: {exc}") from exc
         if not isinstance(snapshot, dict):
             raise DatasetError(f"snapshot {index}: must be an object")
         required = {
@@ -52,6 +59,9 @@ def build_dataset_artifact(
                 f"snapshot {index}: exchange_time_ms is after observed_at_ms"
             )
         previous_observed = observed_at
+        if previous_exchange is not None and exchange_time < previous_exchange:
+            raise DatasetError(f"snapshot {index}: exchange_time_ms moved backwards")
+        previous_exchange = exchange_time
         identities.add(
             (str(snapshot["research_symbol"]), str(snapshot["executable_pair"]))
         )
@@ -75,6 +85,8 @@ def build_dataset_artifact(
         "last_observed_at_ms": int(rows[-1]["observed_at_ms"]),
         "jsonl_sha256": digest.hexdigest(),
     }
+    if source_metadata is not None:
+        baseline["source_metadata"] = source_metadata
     manifest = {
         "schema_version": "historical_dataset_manifest/0.1",
         "dataset_id": stable_id("historical_dataset", baseline),
@@ -100,6 +112,8 @@ def write_dataset(
     """Write new JSONL + manifest outputs; neither may already exist."""
     destination = Path(jsonl_path)
     manifest_destination = Path(manifest_path)
+    if destination.resolve() == manifest_destination.resolve():
+        raise DatasetError("JSONL and manifest paths must differ")
     if destination.exists() or manifest_destination.exists():
         raise FileExistsError("dataset outputs must be new")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -108,12 +122,14 @@ def write_dataset(
     actual_sha = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     if actual_sha != manifest.get("jsonl_sha256"):
         raise DatasetError("manifest hash does not match dataset rows")
+    created: list[Path] = []
     try:
-        destination.write_text(payload, encoding="utf-8")
-        manifest_destination.write_text(
-            canonical_json(manifest) + "\n", encoding="utf-8"
-        )
+        for path, content in ((destination, payload),
+                              (manifest_destination, canonical_json(manifest) + "\n")):
+            with path.open("x", encoding="utf-8") as handle:
+                created.append(path)
+                handle.write(content)
     except Exception:
-        destination.unlink(missing_ok=True)
-        manifest_destination.unlink(missing_ok=True)
+        for path in created:
+            path.unlink(missing_ok=True)
         raise

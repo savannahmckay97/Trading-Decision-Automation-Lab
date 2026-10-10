@@ -25,7 +25,9 @@ See `PROJECT_BOUNDARY.md` for the full rule.
 7. `market_observer/dataset.py` — immutable causal historical-dataset artifacts.
 8. `market_observer/outcomes.py` — post-hoc forward market labels, kept separate from evaluator inputs.
 9. `market_observer/paper.py` — deterministic cost-aware research-only paper fills.
-10. `tests/` — deterministic failure, progression, replay, parity, dataset, outcome-label, paper-fill and recovery tests.
+10. `market_observer/ingestion.py` — bounded offline historical candle imports, explicitly incomplete and unverified as-of reconstructions.
+11. `market_observer/snapshots.py` — shared typed snapshot boundary and exact persisted-decimal decoding.
+12. `tests/` — deterministic failure, progression, replay, parity, dataset, ingestion, outcome-label, paper-fill and recovery tests.
 
 ## First runnable behavior
 
@@ -62,6 +64,37 @@ python observer.py --base TAO --loop --poll-seconds 60
 
 The default database is `data/trading_decision_lab.sqlite`. Use Ctrl-C to stop loop mode.
 
+## Import historical candles
+
+The offline importer turns a saved Binance USD-M 15-minute kline export, wrapped
+with explicit instrument/range/acquisition metadata, into immutable normalized
+snapshots. Start with this **synthetic three-bar example**, which demonstrates the
+file workflow only:
+
+```sh
+python -m market_observer.ingestion \
+  --source examples/binance_15m_synthetic.json --base TAO \
+  --output data/example_candles.jsonl --manifest data/example_candles.manifest.json
+python -m market_observer.replay \
+  --jsonl data/example_candles.jsonl --base TAO --output results/example_replay.json
+python -m json.tool data/example_candles.manifest.json
+python -m json.tool results/example_replay.json
+```
+
+Use new output names for each run. Commands finish automatically; Ctrl-C stops a
+running command. For real data, supply a saved source envelope in the documented
+format. The importer does not download or schedule collection.
+
+**Candle-only imports produce `DATA_STALE`, not trade signals.** OI, taker flow and
+Kraken confirmation stay absent. Historical cutoffs are explicitly reconstructed;
+actual acquisition timestamps are retained and historical availability is marked
+unverified. The default feature warmup requires 97 completed bars, but enough
+candles alone still cannot satisfy the existing strategy. These replay decisions
+lack the feature anchor needed by the current outcome-label path.
+
+See [the ingestion contract](docs/HISTORICAL_INGESTION_V0_1.md) for source fields,
+strict validation, time semantics, limitations and verification.
+
 ## Historical decision replay
 
 Replay deliberately uses the same `calculate_features`, gate, score and state-machine functions as the live observer. It does not contain a second strategy implementation.
@@ -85,6 +118,11 @@ python -m market_observer.replay \
 ```
 
 Replay input must already be chronological and must preserve the data actually available at each historical instant. The runner rejects reversed chronology, records duplicate and missing completed bars, resets an active setup across a detected gap, and refuses to overwrite a prior result file.
+
+JSONL and SQLite loaders restore declared decimal fields exactly. Dataset and
+replay boundaries reject unknown fields, including nested research outcomes.
+Explicit candle-only reconstructions are accepted solely as incomplete research
+inputs and fail closed; they are not evidence of historical signal availability.
 
 This is **decision replay, not a profitability backtest**. It does not simulate fills, fees, slippage, funding, borrow, liquidation or expectancy.
 
@@ -135,6 +173,12 @@ Blocked or stale cycles freeze the state machine. Repeated polling of the same c
 
 ## Current verification boundary
 
-The deterministic suite now includes 39 tests, including live/replay evaluator parity, repeated-live-poll idempotence, immutable dataset checks, post-hoc outcome-label safeguards and cost-aware paper-fill behavior. GitHub Actions runs the suite plus specification validation on Python 3.10 and 3.12. Live Binance and Kraken provider integration remains unverified. No credential is used and no order route exists.
+The deterministic suite now includes 60 tests, including ingestion, JSONL/SQLite
+round-trip replay parity, nested input isolation, competing-writer protection,
+live/replay evaluator parity, immutable datasets, outcome labels and paper fills.
+GitHub Actions runs the suite plus specification validation on Python 3.10 and
+3.12. The ingestion implementation's Binance request returned HTTP 451, so its
+integrated checks used synthetic fixtures. Live Binance and Kraken provider
+integration remains unverified. No credential is used and no order route exists.
 
 The next compartment is a deterministic RiskGovernor that can accept a structured proposed trade intent and either reject it or produce bounded research/paper sizing. It must remain incapable of live order submission. Experiment aggregation and benchmark reporting come after that; parameter optimization and live execution remain out of scope.

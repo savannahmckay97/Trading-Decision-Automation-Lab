@@ -11,7 +11,6 @@ import argparse
 import json
 import sqlite3
 from collections import Counter
-from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -20,10 +19,11 @@ from .config import ObserverConfig
 from .engine import default_setup_state
 from .evaluator import evaluate_snapshot
 from .features import FeatureError, calculate_features
+from .snapshots import SnapshotError, decode_snapshot, load_snapshot_json
 from .util import canonical_json, stable_id
 
 
-REPLAY_VERSION = "trading-decision-lab-replay-0.2.0"
+REPLAY_VERSION = "trading-decision-lab-replay-0.3.0"
 
 
 class ReplayError(ValueError):
@@ -38,8 +38,8 @@ def load_jsonl_snapshots(path: str | Path) -> Iterator[dict[str, Any]]:
             if not line.strip():
                 continue
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
+                value = load_snapshot_json(line)
+            except (json.JSONDecodeError, SnapshotError) as exc:
                 raise ReplayError(f"invalid JSON on line {line_number}: {exc}") from exc
             if not isinstance(value, dict):
                 raise ReplayError(f"line {line_number}: snapshot must be an object")
@@ -67,7 +67,10 @@ def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) 
             params = (research_symbol,)
         query += " ORDER BY observed_at_ms, rowid"
         for (payload_json,) in db.execute(query, params):
-            value = json.loads(payload_json)
+            try:
+                value = load_snapshot_json(payload_json)
+            except (json.JSONDecodeError, SnapshotError) as exc:
+                raise ReplayError(f"invalid stored snapshot: {exc}") from exc
             if not isinstance(value, dict):
                 raise ReplayError("stored normalized snapshot is not an object")
             yield value
@@ -88,11 +91,15 @@ class ReplayRunner:
         gaps: list[dict[str, Any]] = []
         previous_close_time: int | None = None
         previous_observed_at: int | None = None
+        previous_exchange_time: int | None = None
         signal_counts: Counter[str] = Counter()
         sequence_counts: Counter[str] = Counter()
 
         for index, original in enumerate(snapshots):
-            snapshot = deepcopy(original)
+            try:
+                snapshot = decode_snapshot(original, require_complete=True)
+            except SnapshotError as exc:
+                raise ReplayError(f"snapshot {index}: {exc}") from exc
             self._validate_identity(snapshot, index)
             observed_at = int(snapshot["observed_at_ms"])
             if previous_observed_at is not None and observed_at < previous_observed_at:
@@ -100,6 +107,10 @@ class ReplayRunner:
                     f"snapshot {index}: observed_at_ms moved backwards; input must be chronological"
                 )
             previous_observed_at = observed_at
+            exchange_time = snapshot["exchange_time_ms"]
+            if previous_exchange_time is not None and exchange_time < previous_exchange_time:
+                raise ReplayError(f"snapshot {index}: exchange_time_ms moved backwards")
+            previous_exchange_time = exchange_time
 
             try:
                 features = calculate_features(snapshot, self.config)

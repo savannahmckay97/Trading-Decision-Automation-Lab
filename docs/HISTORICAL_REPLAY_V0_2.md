@@ -11,6 +11,17 @@ It does **not** estimate profitability.
 - `normalized_snapshots` stored by this project's SQLite event store; or
 - UTF-8 JSON Lines containing one complete `normalized_snapshot/0.1` object per line.
 
+Replay implementation 0.3.0 adds schema-aware persisted Decimal decoding and
+recursive field isolation. It rejects unknown fields and backwards exchange/cutoff
+times even when acquisition timestamps are equal. These are boundary changes;
+the feature and strategy rules are unchanged. Dataset implementation 0.2.0 applies
+the same field isolation and chronological checks before fingerprinting.
+
+The explicit `historical_context` extension permits candle-only reconstructions
+as incomplete research inputs; they must remain unverified and fail closed. See
+`HISTORICAL_INGESTION_V0_1.md`. Their acquisition time is real, their cutoff is
+reconstructed, and neither is evidence of historical publication availability.
+
 The source must retain event time, receipt time, venue, symbol, quote currency and the rolling data windows that were available at each as-of point. A later full-history download sliced after the fact is not equivalent unless publication delays and revisions are reconstructed.
 
 ## Causality and sequence rules

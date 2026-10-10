@@ -1,0 +1,19 @@
+{
+  "schema_version": "binance_kline_source/0.1",
+  "venue": "binance",
+  "market_type": "usds_m_futures",
+  "symbol": "TAOUSDT",
+  "base_asset": "TAO",
+  "quote_asset": "USDT",
+  "interval": "15m",
+  "price_unit": "USDT_per_base",
+  "volume_unit": "base_asset",
+  "start_open_time_ms": 1759276800000,
+  "end_open_time_ms": 1759279500000,
+  "acquired_at_ms": 1759284000000,
+  "klines": [
+    [1759276800000, "100", "102", "99", "101", "10", 1759277699999, "1010", 20, "6", "606", "0"],
+    [1759277700000, "101", "103", "100", "102", "10", 1759278599999, "1020", 20, "6", "612", "0"],
+    [1759278600000, "102", "104", "101", "103", "10", 1759279499999, "1030", 20, "6", "618", "0"]
+  ]
+}

@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from market_observer.dataset import DatasetError, build_dataset_artifact, write_dataset
 
@@ -79,6 +80,32 @@ class DatasetArtifactTests(unittest.TestCase):
                     jsonl_path=Path(directory) / "x.jsonl",
                     manifest_path=Path(directory) / "x.json",
                 )
+
+    def test_write_rejects_same_output_path(self):
+        rows, manifest = build_dataset_artifact([snapshot(1000)], source="fixture")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "same.json"
+            with self.assertRaises(DatasetError):
+                write_dataset(rows, manifest, jsonl_path=path, manifest_path=path)
+            self.assertFalse(path.exists())
+
+    def test_concurrent_manifest_collision_preserves_other_writers_file(self):
+        rows, manifest = build_dataset_artifact([snapshot(1000)], source="fixture")
+        with tempfile.TemporaryDirectory() as directory:
+            data, meta = Path(directory)/"data.jsonl", Path(directory)/"manifest.json"
+            original_open = Path.open
+
+            def competing_open(path, mode="r", *args, **kwargs):
+                if path == meta and mode == "x":
+                    with original_open(meta, "w") as other:
+                        other.write("other writer")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", competing_open):
+                with self.assertRaises(FileExistsError):
+                    write_dataset(rows, manifest, jsonl_path=data, manifest_path=meta)
+            self.assertEqual(meta.read_text(), "other writer")
+            self.assertFalse(data.exists())
 
 
 if __name__ == "__main__":

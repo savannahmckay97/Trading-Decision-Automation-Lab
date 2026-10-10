@@ -2,6 +2,16 @@
 
 All versions belong only to the independent **Trading Decision Automation Lab** project.
 
+## Unreleased — historical ingestion and persisted snapshot boundary
+
+- Add bounded offline Binance USD-M 15m source-envelope ingestion and a synthetic runnable example.
+- Preserve acquisition timestamps separately from explicitly unverified historical cutoffs; never invent missing market context.
+- Add recursive snapshot field validation and exact JSONL/SQLite Decimal decoding.
+- Reject backwards cutoff chronology and nested outcome/decision/fill fields.
+- Use exclusive immutable dataset writes; preserve other writers' files on failure.
+- Dataset implementation is now 0.2.0; replay implementation is 0.3.0. Strategy logic is unchanged.
+- Add 21 regression/acceptance tests (60 total). Actual Binance integration remains unverified: HTTP 451 during the implementation check.
+
 ## v0.2.0 — historical decision replay
 
 - Added chronological replay from this project's SQLite snapshots or JSON Lines.
