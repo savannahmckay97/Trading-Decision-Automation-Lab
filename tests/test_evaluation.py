@@ -250,11 +250,21 @@ AVAILABLE = {"status": "AVAILABLE"}
 
 
 class RewardFirstTouchTests(unittest.TestCase):
+    def test_heterogeneous_ratios_use_mean_ratio_breakeven_and_realized_r(self):
+        rows = [{"reward_first_touch": item} for item in (
+            _first_touch(risk(ratio="0.5"), AVAILABLE, [bar(111, 100, 105)]),
+            _first_touch(risk(ratio="4"), AVAILABLE, [bar(100, 94, 94)]),
+            _first_touch(risk(ratio="0.5"), AVAILABLE, [bar(100, 94, 94)]),
+        )]
+        close = _first_touch_summary(rows)["close_stop"]
+        self.assertEqual(close["breakeven_target_rate_at_mean_ratio"], Decimal(1) / (1 + Decimal(5) / 3))
+        self.assertEqual(close["realized_gross_r_of_decided"], Decimal("-1.5"))
+        self.assertNotIn("mean_breakeven_target_rate_of_decided", close)
+
     def test_target_first(self):
         result = _first_touch(risk(), AVAILABLE, [bar(105, 100, 104), bar(111, 103, 109)])
         self.assertEqual(result["wick_stop"], {"result": "TARGET_FIRST", "bars": 2})
         self.assertEqual(result["close_stop"], {"result": "TARGET_FIRST", "bars": 2})
-        self.assertEqual(result["breakeven_target_rate"], Decimal(1) / 3)
 
     def test_stop_first(self):
         result = _first_touch(risk(), AVAILABLE, [bar(101, 94, 94.5), bar(112, 94, 111)])
@@ -298,7 +308,11 @@ class RewardFirstTouchTests(unittest.TestCase):
         wick = summary["wick_stop"]
         self.assertEqual(wick["decided_count"], 2)
         self.assertEqual(wick["target_first_fraction_of_decided"], Decimal("0.5"))
-        self.assertEqual(wick["mean_breakeven_target_rate_of_decided"], (Decimal("0.5") + Decimal("0.25")) / 2)
+        # Ratios 1 and 3 on the decided cases: breakeven at mean ratio 2 is 1/3,
+        # not the mean of 1/2 and 1/4. Realized: +1R (target) - 1R (stop).
+        self.assertEqual(wick["breakeven_target_rate_at_mean_ratio"], Decimal(1) / 3)
+        self.assertEqual(wick["realized_gross_r_of_decided"], Decimal(0))
+        self.assertEqual(wick["mean_realized_gross_r_of_decided"], Decimal(0))
         self.assertEqual(wick["result_counts"]["AMBIGUOUS_SAME_BAR"], 1)
         self.assertEqual(summary["close_stop"]["decided_count"], 3)
         self.assertEqual(summary["basis"], "GROSS_DESCRIPTIVE_NO_COSTS_NOT_EXPECTANCY")

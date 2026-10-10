@@ -50,7 +50,7 @@ def replay(data_dir, config=None):
             counts["skipped_missing_taker_bucket"] += 1; state = None; continue
         close = b["close"]
         snap = {
-            "exchange_time_ms": boundary + 180_000,
+            "exchange_time_ms": boundary + 240_000,  # after the slowest taker publication seen (194 s)
             "candles_15m": bars[max(0, i - 149): i + 1],
             "open_interest_5m": [r for r in oi_rows if boundary - 4 * 3_600_000 <= r["timestamp_ms"] <= boundary],
             "taker_flow_5m": composing, "funding_history": [],

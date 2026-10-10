@@ -250,7 +250,6 @@ def _first_touch(risk: Any, label: dict[str, Any], path: list[dict[str, Any]] | 
         "invalidation_level": stop,
         "gross_opportunity_to_risk": ratio,
         # Hit rate at which a gross binary target/stop outcome breaks even.
-        "breakeven_target_rate": 1 / (1 + ratio),
         "wick_stop": {"result": wick[0], "bars": wick[1]},
         "close_stop": {"result": close[0], "bars": close[1]},
     }
@@ -267,15 +266,24 @@ def _first_touch_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         counts = Counter(item[rule]["result"] for item in labeled)
         decided = [item for item in labeled if item[rule]["result"] in {"TARGET_FIRST", "STOP_FIRST"}]
         targets = sum(item[rule]["result"] == "TARGET_FIRST" for item in decided)
+        ratios = [decimal(item["gross_opportunity_to_risk"]) for item in decided]
+        # Each decided case risks 1R and pays its own ratio if the target comes
+        # first. At one common hit rate p the set breaks even when
+        # p * sum(r) = (1 - p) * n, i.e. p = 1 / (1 + mean r). Averaging
+        # 1 / (1 + r_i) instead overstates the threshold (Jensen; it is convex).
+        realized = sum(
+            (ratio if item[rule]["result"] == "TARGET_FIRST" else Decimal(-1))
+            for item, ratio in zip(decided, ratios)
+        )
         summary[rule] = {
             "result_counts": {name: counts[name] for name in FIRST_TOUCH_STATUSES},
             "decided_count": len(decided),
             "target_first_fraction_of_decided": Decimal(targets) / len(decided) if decided else None,
-            # The fraction the ratios would need, on the same decided cases.
-            "mean_breakeven_target_rate_of_decided": (
-                sum((item["breakeven_target_rate"] for item in decided), Decimal(0)) / len(decided)
-                if decided else None
+            "breakeven_target_rate_at_mean_ratio": (
+                1 / (1 + sum(ratios, Decimal(0)) / len(ratios)) if decided else None
             ),
+            "realized_gross_r_of_decided": realized if decided else None,
+            "mean_realized_gross_r_of_decided": realized / len(decided) if decided else None,
         }
     summary["basis"] = "GROSS_DESCRIPTIVE_NO_COSTS_NOT_EXPECTANCY"
     return summary

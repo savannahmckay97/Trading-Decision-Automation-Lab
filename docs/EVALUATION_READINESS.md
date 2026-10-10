@@ -31,8 +31,12 @@ Assumptions, because this is not an as-of TDAL dataset:
   never block. Freshness gates are not applied.
 - **Possibly revised history.** Values are as served on 2026-10-11, not as
   published at the time; Binance revisions are unknown.
-- **No outcomes computed.** Forward outcomes were deliberately not computed, so
-  this window is not spent as evaluation data.
+- **Decision time 240 s after the close.** This is later than the slowest
+  taker publication observed live (194 s). The first outcome bar still
+  includes those minutes before the decision.
+- **Outcomes computed later, under preregistration.** Forward outcomes were
+  not computed for this count. They were computed afterwards in a
+  preregistered exploratory analysis: `research/first_touch_exploratory/`.
 
 Result (2,779 bars, 28.95 days, ending 2026-10-11 UTC; no skipped bars):
 

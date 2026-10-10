@@ -202,7 +202,7 @@ See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigatio
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 147 tests covering live/replay guards, the
+The integrated deterministic suite includes 148 tests covering live/replay guards, the
 per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
 manifest compatibility, outcome/paper workflows and descriptive evaluation.
 GitHub Actions runs the suite plus specification validation on Python 3.10 and

@@ -85,10 +85,13 @@ labelled separately under two stop meanings:
 
 Selections without a reward reference (`TARGET_UNAVAILABLE`), without a risk
 contract, or with censored/unavailable paths are counted but never scored.
-`tdal_reward_first_touch` compares, on the same decided cases, the target-first
-fraction with the mean breakeven rate `1 / (1 + gross ratio)` that the recorded
-ratios imply. If targets are reached less often than that, the gross ratio
-overstates the opportunity. This is gross price movement from the completed
+`tdal_reward_first_touch` reports, on the same decided cases, the target-first
+fraction, the breakeven rate at the mean ratio `1 / (1 + mean r)` (the rate at
+which a set of 1R-risk cases with payoffs rᵢ breaks even under one common hit
+rate), and the realised gross R (`+rᵢ` per target-first, `−1` per stop-first).
+Averaging `1/(1+rᵢ)` would overstate the threshold, because the function is
+convex. Realised R does not assume the hit rate is independent of the ratio.
+Gross R assumes exits exactly at the levels. This is gross price movement from the completed
 close: a touch is not a fill, there are no costs, and it is conditional on a
 target having existed. It is not expectancy.
 
