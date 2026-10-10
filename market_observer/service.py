@@ -31,6 +31,9 @@ class ObserverService:
 
     def cycle(self) -> dict[str, Any]:
         events, errors = self.collectors.collect()
+        completed_at = getattr(self.collectors, "completed_at_ms", None)
+        if completed_at is None:
+            completed_at = now_ms()
         self.store.append_collection(events.values(), errors)
         snapshot_id: str | None = None
         try:
@@ -39,6 +42,7 @@ class ObserverService:
                 errors,
                 self.config.research_symbol,
                 self.config.executable_pair,
+                completed_at_ms=completed_at,
             )
             snapshot_id = self.store.append_snapshot(snapshot)
             previous = self.store.load_setup_state(STRATEGY_ID, self.config.research_symbol)

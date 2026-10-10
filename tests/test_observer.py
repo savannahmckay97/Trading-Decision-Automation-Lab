@@ -105,7 +105,10 @@ class SequenceCollectors:
         self.batches = list(batches)
 
     def collect(self):
-        return self.batches.pop(0)
+        events, errors = self.batches.pop(0)
+        self.completed_at_ms = max([event.received_time_ms for event in events.values()]
+                                   + [error.received_time_ms for error in errors])
+        return events, errors
 
 
 class FeatureTests(unittest.TestCase):
