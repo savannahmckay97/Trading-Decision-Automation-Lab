@@ -249,7 +249,6 @@ def _first_touch(risk: Any, label: dict[str, Any], path: list[dict[str, Any]] | 
         "target_level": target,
         "invalidation_level": stop,
         "gross_opportunity_to_risk": ratio,
-        # Hit rate at which a gross binary target/stop outcome breaks even.
         "wick_stop": {"result": wick[0], "bars": wick[1]},
         "close_stop": {"result": close[0], "bars": close[1]},
     }

@@ -40,6 +40,10 @@ the stop did):
 | 4 | close | 0.40 | 0.49 | −2.16R / −0.43R |
 | 96 | close | 0.33 | 0.36 | −4.35R / −0.48R |
 
+Close-rule R is optimistic: a close-rule stop exits at a close below the
+level, so each loss is at least −1R, and −2.35R is a best case for these
+prices.
+
 On the primary measure, the target-first rate sits slightly *above* the
 corrected breakeven, yet realised gross R is negative. Both statements are
 true because the three targets reached had small ratios (0.81, 0.32, 0.52),
@@ -109,14 +113,16 @@ a useless one, which was expected before running (`EVALUATION_READINESS.md` §3)
 These points come from geometry measured independently of outcomes, not from
 the outcome counts.
 
-- **The setup invalidation is not a usable protective stop under the wick
-  rule.** Stop distances were a median 0.94 ATR from entry (range 0.30–2.62;
-  five under 0.6 ATR). A 15-minute bar typically spans about 1 ATR, so an
-  intrabar wick through the invalidation is expected noise. That is consistent
-  with 4 of 5 wick stop-outs at 16 bars happening on the very next bar.
-  `DECISION_RISK.md` already separates setup failure (close) from a protective
-  stop. For the RiskGovernor this means a protective stop needs its own
-  definition, which should be designed on first principles and validated on new
-  data, **not fitted to these 9 cases.**
+- **At short distances, the setup invalidation is not a usable wick stop.**
+  Stop distances were a median 0.94 ATR from entry (range 0.30–2.62; five
+  under 0.6 ATR). At the short end, a single bar's typical range can reach the
+  level, so a wick rule there will often trigger on ordinary movement. At the
+  median distance a one-bar drop that far is a tail event, so the argument does
+  not extend to typical setups. The outcome counts neither confirm nor refute
+  it: three of the four bar-1 wick stops (09-18, 10-06, 10-09) were also bar-1
+  close breaches, which are genuine setup failures. Only 09-12 and the 09-27
+  07:30 decision were wick-only stops. For the RiskGovernor, a protective stop
+  should get its own definition, designed on first principles and validated on
+  new data, **not fitted to these 9 cases.**
 - **Target coverage is the larger practical gap.** 8 of 17 setups had no
   reference at all.
