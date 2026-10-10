@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import json
+import unittest
+from decimal import Decimal
+
+from market_observer.config import ObserverConfig
+from market_observer.decision_risk import assess_decision_risk
+from market_observer.engine import default_setup_state
+from market_observer.evaluator import evaluate_snapshot
+from market_observer.normalization import build_snapshot
+from market_observer.replay import ReplayRunner
+from market_observer.service import ObserverService
+from market_observer.storage import EventStore
+from market_observer.util import canonical_json
+from test_observer import INTERVAL, SequenceCollectors, events_for
+
+
+def snapshot(stage, **kwargs):
+    return build_snapshot(*events_for(stage, **kwargs), "TAOUSDT", "TAOUSD")
+
+
+def flatten_keys(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from flatten_keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from flatten_keys(item)
+
+
+class DecisionRiskTests(unittest.TestCase):
+    def setUp(self):
+        self.config = ObserverConfig()
+
+    def test_watch_long_reports_close_invalidation_and_setup_window(self):
+        evaluation = evaluate_snapshot(snapshot("breakout"), self.config, None)
+        risk = evaluation.risk
+        state = evaluation.state
+        self.assertEqual(evaluation.signal, "WATCH_LONG")
+        self.assertEqual(risk["status"], "AVAILABLE")
+        self.assertEqual(risk["setup_id"], state["setup_id"])
+        expected_level = state["breakout_resistance"] - Decimal("0.15") * state["breakout_atr"]
+        self.assertEqual(risk["invalidation"]["level"], expected_level)
+        self.assertEqual(risk["invalidation"]["rule"], "COMPLETED_CLOSE_BELOW")
+        self.assertFalse(risk["invalidation"]["intrabar_touch_invalidates"])
+        self.assertEqual(risk["reference_price"]["value"], Decimal("103"))
+        self.assertEqual(risk["per_unit_risk"]["distance"], Decimal("103") - expected_level)
+        self.assertEqual(risk["per_unit_risk"]["distance_quote"], "USDT")
+        self.assertFalse(risk["venue"]["cross_venue_parity_assumed"])
+        self.assertEqual(
+            risk["setup_window"]["last_evaluable_close_time_ms"],
+            state["breakout_close_time_ms"] + self.config.expiry_bars * INTERVAL,
+        )
+
+    def test_long_eligible_uses_breakout_levels_frozen_in_setup(self):
+        first = evaluate_snapshot(snapshot("breakout"), self.config, None)
+        second = evaluate_snapshot(snapshot("retest", received_offset=1), self.config, first.state)
+        risk = second.risk
+        self.assertEqual(second.signal, "LONG_ELIGIBLE")
+        self.assertEqual(risk["status"], "AVAILABLE")
+        self.assertEqual(risk["invalidation"]["level"], first.risk["invalidation"]["level"])
+        self.assertEqual(risk["reference_price"]["value"], Decimal("101.5"))
+        self.assertEqual(
+            risk["setup_window"]["last_evaluable_close_time_ms"],
+            second.completed_candle_close_time_ms,
+        )
+
+    def test_executable_spread_is_reported_in_bps_beside_research_distance(self):
+        risk = evaluate_snapshot(snapshot("breakout"), self.config, None).risk["per_unit_risk"]
+        self.assertGreater(risk["executable_spread_bps"], 0)
+        self.assertEqual(
+            risk["distance_plus_spread_bps"],
+            risk["distance_bps_of_reference"] + risk["executable_spread_bps"],
+        )
+        self.assertFalse(risk["gap_loss_bounded"])
+
+    def test_no_active_setup_is_not_applicable(self):
+        evaluation = evaluate_snapshot(snapshot("flat"), self.config, None)
+        self.assertEqual(evaluation.signal, "NO_TRADE")
+        self.assertEqual(evaluation.risk["status"], "NOT_APPLICABLE")
+        self.assertNotIn("invalidation", evaluation.risk)
+
+    def test_blocked_cycle_withholds_figures_even_with_active_setup(self):
+        first = evaluate_snapshot(snapshot("breakout"), self.config, None)
+        blocked = evaluate_snapshot(
+            snapshot("retest", spread=True, received_offset=1), self.config, first.state
+        )
+        self.assertEqual(blocked.signal, "RISK_BLOCKED")
+        self.assertEqual(blocked.state["state"], "BREAKOUT_OBSERVED")
+        self.assertEqual(blocked.risk["status"], "WITHHELD_BLOCKED")
+        self.assertNotIn("invalidation", blocked.risk)
+
+    def test_reference_at_or_below_invalidation_fails_closed(self):
+        setup = {
+            **default_setup_state(),
+            "state": "RETEST_PENDING",
+            "setup_id": "BREAKOUT_RETEST_V1:1",
+            "breakout_resistance": Decimal("100"),
+            "breakout_atr": Decimal("2"),
+            "breakout_close_time_ms": 1,
+        }
+        features = {"completed_close": Decimal("99.7"), "completed_candle_close_time_ms": 2, "spread_bps": None}
+        risk = assess_decision_risk("WATCH_LONG", setup, features, self.config)
+        self.assertEqual(risk["status"], "UNAVAILABLE")
+        self.assertEqual(risk["reason"], "reference_at_or_below_invalidation")
+
+    def test_malformed_setup_fails_closed(self):
+        setup = {**default_setup_state(), "state": "RETEST_PENDING", "breakout_resistance": "100", "breakout_atr": None}
+        features = {"completed_close": "101", "completed_candle_close_time_ms": 2}
+        risk = assess_decision_risk("WATCH_LONG", setup, features, self.config)
+        self.assertEqual(risk["status"], "UNAVAILABLE")
+
+    def test_persisted_string_values_give_identical_contract(self):
+        evaluation = evaluate_snapshot(snapshot("breakout"), self.config, None)
+        restored_state = json.loads(canonical_json(evaluation.state))
+        restored = assess_decision_risk(evaluation.signal, restored_state, evaluation.features, self.config)
+        self.assertEqual(canonical_json(restored), canonical_json(evaluation.risk))
+
+    def test_contract_never_sizes_or_permits_execution(self):
+        evaluation = evaluate_snapshot(snapshot("breakout"), self.config, None)
+        keys = set(flatten_keys(evaluation.risk))
+        self.assertFalse({key for key in keys if "quantity" in key or "notional" in key})
+        self.assertEqual(evaluation.risk["sizing"], "NOT_COMPUTED_ACCOUNT_STATE_UNKNOWN")
+        self.assertEqual(evaluation.risk["execution_permission"], "NONE")
+        self.assertEqual(evaluation.risk["reward_reference"], "NOT_DEFINED_BY_STRATEGY")
+
+    def test_live_and_replay_emit_identical_risk(self):
+        snapshots = [snapshot("breakout"), snapshot("retest", received_offset=1)]
+        replay = ReplayRunner(self.config).run(snapshots)["decisions"]
+        with EventStore(":memory:") as store:
+            service = ObserverService(
+                self.config,
+                store,
+                SequenceCollectors([events_for("breakout"), events_for("retest", received_offset=1)]),
+            )
+            live = [service.cycle(), service.cycle()]
+        self.assertEqual([item["risk"]["status"] for item in live], ["AVAILABLE", "AVAILABLE"])
+        for live_decision, replay_decision in zip(live, replay):
+            self.assertEqual(canonical_json(live_decision["risk"]), canonical_json(replay_decision["risk"]))
+
+    def test_failure_decisions_carry_withheld_risk(self):
+        broken = snapshot("breakout")
+        broken["candles_15m"] = broken["candles_15m"][:5]
+        decision = ReplayRunner(self.config).run([broken])["decisions"][0]
+        self.assertEqual(decision["signal"], "DATA_STALE")
+        self.assertEqual(decision["risk"]["status"], "WITHHELD_BLOCKED")
+
+
+if __name__ == "__main__":
+    unittest.main()

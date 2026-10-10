@@ -19,7 +19,7 @@ PR #2 review fixes: censor outcome paths first received after the declared windo
 
 - Enforce one normalized as-of availability contract before live/replay features and offline evaluation; preserve state on temporal failures and report `ASOF_INVALID` replay cycles.
 - Add regressions for future evidence/receipts, strict timestamps, optional provenance and precomputed-feature bypass; document open-candle semantics and the local capture handoff.
-
+- Add a `risk` contract (`decision_risk/0.1`) to every live and replay decision: research-venue completed-close invalidation, per-unit distance and spread proxy, setup window, and explicit exclusions. No sizing or execution permission. See `docs/DECISION_RISK.md`.
 - Add frozen-dataset-bound descriptive decision evaluation against simple selection baselines, with missing/censored outcomes and abstention trade-offs disclosed.
 - Restore decimal fields when replaying saved JSONL/SQLite snapshots; verify persistence-to-replay parity.
 - Document the constrained MVP, product assumptions, causal limitations and evaluation-driven advancement gates.

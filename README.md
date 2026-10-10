@@ -160,6 +160,10 @@ python -m market_observer.paper \
 
 The execution contract is deliberately conservative about what is known. Historical candles currently come from Binance USD-M research data, not a historical Kraken execution tape, so every fill records `executable_venue_validated: false`. Funding, order-book depth, latency, partial fills, queue position and liquidity impact remain unmodeled. The artifact reports per-unit hypothetical execution results only; it does not size positions, compound equity, authorize trades or make a strategy-performance claim.
 
+## Decision risk contract
+
+Each decision includes a `risk` object stating the active setup's completed-close invalidation level, the per-unit distance to it at the research venue, and the Kraken spread as a cost proxy. It computes no quantity and grants no permission; blocked or setup-less cycles withhold figures. See `docs/DECISION_RISK.md`.
+
 ## Meaning of signals
 
 | Signal | Meaning |
