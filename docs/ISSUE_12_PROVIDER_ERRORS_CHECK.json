@@ -1,0 +1,114 @@
+{
+  "action": "NO_ORDER",
+  "breakout_quality": null,
+  "collection_errors": [
+    {
+      "critical": false,
+      "detail": "HttpError: GET /fapi/v1/ticker/bookTicker failed after 1 attempts: HTTP 400: {\"code\":-1121,\"msg\":\"Invalid symbol.\"}",
+      "endpoint": "binance_book",
+      "received_time_ms": 1791674325165,
+      "source": "binance_usds_m_futures",
+      "symbol": "NOTACOINUSDT"
+    },
+    {
+      "critical": true,
+      "detail": "HttpError: GET /fapi/v1/klines failed after 1 attempts: HTTP 400: {\"code\":-1121,\"msg\":\"Invalid symbol.\"}",
+      "endpoint": "binance_klines",
+      "received_time_ms": 1791674325147,
+      "source": "binance_usds_m_futures",
+      "symbol": "NOTACOINUSDT"
+    },
+    {
+      "critical": false,
+      "detail": "HttpError: GET /fapi/v1/openInterest failed after 1 attempts: HTTP 400: {\"code\":-1121,\"msg\":\"Invalid symbol.\"}",
+      "endpoint": "binance_oi",
+      "received_time_ms": 1791674325161,
+      "source": "binance_usds_m_futures",
+      "symbol": "NOTACOINUSDT"
+    },
+    {
+      "critical": true,
+      "detail": "ValueError: binance_oi_history: required series must be a non-empty array",
+      "endpoint": "binance_oi_history",
+      "received_time_ms": 1791674325134,
+      "source": "binance_usds_m_futures",
+      "symbol": "NOTACOINUSDT"
+    },
+    {
+      "critical": true,
+      "detail": "HttpError: GET /fapi/v1/ticker/price failed after 1 attempts: HTTP 400: {\"code\":-1121,\"msg\":\"Invalid symbol.\"}",
+      "endpoint": "binance_price",
+      "received_time_ms": 1791674325204,
+      "source": "binance_usds_m_futures",
+      "symbol": "NOTACOINUSDT"
+    },
+    {
+      "critical": true,
+      "detail": "ValueError: binance_taker: required series must be a non-empty array",
+      "endpoint": "binance_taker",
+      "received_time_ms": 1791674325182,
+      "source": "binance_usds_m_futures",
+      "symbol": "NOTACOINUSDT"
+    },
+    {
+      "critical": true,
+      "detail": "HttpError: provider error: ['EQuery:Unknown asset pair']",
+      "endpoint": "kraken_ticker",
+      "received_time_ms": 1791674325557,
+      "source": "kraken_spot",
+      "symbol": "NOTACOINUSD"
+    }
+  ],
+  "decision_time_ms": 1791674325578,
+  "executable_pair": "NOTACOINUSD",
+  "execution_permission": "DENIED_OBSERVATION_ONLY",
+  "features": null,
+  "gates": [
+    {
+      "category": "DATA_STALE",
+      "evidence": {
+        "error": "AsOfError: provenance.binance_price: required endpoint is missing"
+      },
+      "rule_id": "T0_FAIL_CLOSED",
+      "status": "FAIL"
+    }
+  ],
+  "mode": "observation_only",
+  "observer_version": "trading-decision-lab-observer-0.2.0",
+  "research_symbol": "NOTACOINUSDT",
+  "risk": {
+    "contract_version": "decision_risk/0.3",
+    "execution_permission": "NONE",
+    "not_included": [
+      "account equity, quantity and portfolio heat",
+      "funding and borrow",
+      "gap or slippage through invalidation",
+      "executable-venue (Kraken) stop price translation",
+      "probability of reaching the reward reference"
+    ],
+    "reason": "DATA_STALE",
+    "setup_id": null,
+    "sizing": "NOT_COMPUTED_ACCOUNT_STATE_UNKNOWN",
+    "status": "WITHHELD_BLOCKED",
+    "strategy_id": "BREAKOUT_RETEST_V1"
+  },
+  "schema_version": "market_decision/0.3",
+  "setup": {
+    "bars_since_breakout": 0,
+    "breakout_atr": null,
+    "breakout_close_time_ms": null,
+    "breakout_resistance": null,
+    "last_evaluated_close_time_ms": null,
+    "setup_id": null,
+    "state": "IDLE",
+    "state_updated": false,
+    "strategy_id": "BREAKOUT_RETEST_V1",
+    "transition": "INITIALIZED"
+  },
+  "signal": "DATA_STALE",
+  "snapshot_id": "snapshot_cf217d158a360202f5993986",
+  "strategy_validated": false,
+  "unknown_or_unimplemented": [
+    "decision inputs unavailable"
+  ]
+}

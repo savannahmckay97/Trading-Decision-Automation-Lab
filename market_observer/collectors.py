@@ -121,6 +121,9 @@ class PublicCollectors:
         critical: bool,
     ) -> RawEvent:
         payload = self.client.get(base, path, params)
+        if critical and name in {"binance_klines", "binance_oi_history", "binance_taker"}:
+            if not isinstance(payload, list) or not payload:
+                raise ValueError(f"{name}: required series must be a non-empty array")
         received = now_ms()
         return RawEvent(source, name, symbol, _event_time(name, payload, received), received, payload, critical)
 
