@@ -166,8 +166,12 @@ def decode_snapshot(value: Any, *, require_complete: bool = False) -> dict[str, 
             raise SnapshotError(f"provenance.{endpoint}: identity mismatch")
         if event["received_time_ms"] > result["observed_at_ms"]:
             raise SnapshotError(f"provenance.{endpoint}: future receipt")
+        # Envelope events describe responses collected concurrently. Kraken's
+        # event clock is its local receipt; other tickers may also update after
+        # the time endpoint returned. Match the shared live guard: envelopes
+        # must be observed, while series rows remain below the exchange cutoff.
         if (endpoint != "binance_klines" and event["event_time_ms"] is not None
-                and event["event_time_ms"] > cutoff):
+                and event["event_time_ms"] > result["observed_at_ms"]):
             raise SnapshotError(f"provenance.{endpoint}: future event")
     context = result.get("historical_context")
     if context is not None:

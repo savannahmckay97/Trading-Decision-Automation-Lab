@@ -1,0 +1,134 @@
+{
+  "action": "NO_ORDER",
+  "checked_at_utc": "2026-10-10T23:10:43.258492+00:00",
+  "collection_errors": [],
+  "completed_boundary_ms": 1791673200000,
+  "execution_permission": "DENIED_OBSERVATION_ONLY",
+  "features": {
+    "atr_15m": "1.226330968461086956442504655",
+    "atr_method": "wilder_rma",
+    "completed_15m": true,
+    "completed_candle_close_time_ms": 1791673199999,
+    "completed_candle_open_time_ms": 1791672300000,
+    "completed_close": "284.77",
+    "completed_high": "285.02",
+    "completed_low": "283.97",
+    "completed_open": "284.78",
+    "cross_venue_divergence_bps": "0.9349956571912238354998166916",
+    "funding_percentile": "1",
+    "funding_rate": "0.00005000",
+    "global_long_account_share": "0.5837",
+    "oi_change_15m_pct": "-0.2453731055235047019740404300",
+    "oi_change_60m_pct": "0.007193333343758454121389100",
+    "price_oi_quadrant": "IMMATERIAL",
+    "resistance": "287.88",
+    "return_15m_pct": "0",
+    "spread_bps": "3.328630953772275597286269468",
+    "support": "282.12",
+    "taker_buy_share": "0.3426147972034298489520400967",
+    "taker_ratio": "0.5211781399184505819075390988",
+    "top_long_account_share": "0.6567",
+    "top_long_position_share": "0.7790",
+    "volume_percentile": "0.6354166666666666666666666667"
+  },
+  "gates": [
+    {
+      "category": "DATA_STALE",
+      "evidence": {
+        "critical_missing": []
+      },
+      "rule_id": "T0_REQUIRED_INPUTS",
+      "status": "PASS"
+    },
+    {
+      "category": "DATA_STALE",
+      "evidence": {
+        "stale_or_invalid": {}
+      },
+      "rule_id": "T0_DATA_FRESHNESS",
+      "status": "PASS"
+    },
+    {
+      "category": "RISK_BLOCKED",
+      "evidence": {
+        "maximum_bps": 15.0,
+        "spread_bps": "3.328630953772275597286269468"
+      },
+      "rule_id": "T0_SPREAD_BUDGET",
+      "status": "PASS"
+    },
+    {
+      "category": "RISK_BLOCKED",
+      "evidence": {
+        "divergence_bps": "0.9349956571912238354998166916",
+        "executable_quote": "USD",
+        "maximum_bps": 35.0,
+        "parity_assumed": false,
+        "research_quote": "USDT"
+      },
+      "rule_id": "T0_VENUE_CONFIRMATION",
+      "status": "PASS"
+    },
+    {
+      "category": "RISK_BLOCKED",
+      "evidence": {
+        "mode": "observation_only",
+        "orders_available": false
+      },
+      "rule_id": "T0_OBSERVATION_ONLY",
+      "status": "PASS"
+    }
+  ],
+  "missing_required_row_blocks": {
+    "open_interest_5m": true,
+    "taker_flow_5m": true
+  },
+  "newest_event_ages_ms": {
+    "binance_oi_history": 43241,
+    "binance_taker": 643241
+  },
+  "observer_signal": "NO_TRADE",
+  "replay_features_match": true,
+  "required_oi_boundaries_ms": [
+    1791669600000,
+    1791672300000,
+    1791673200000
+  ],
+  "required_taker_opens_ms": [
+    1791672300000,
+    1791672600000,
+    1791672900000
+  ],
+  "signal": "NO_TRADE",
+  "taker_kline_checks": [
+    {
+      "buy_matches": true,
+      "buy_volume_difference": "0.0000",
+      "open_time_ms": 1791672300000,
+      "total_matches": true,
+      "total_volume_difference": "0.0000"
+    },
+    {
+      "buy_matches": true,
+      "buy_volume_difference": "0.0000",
+      "open_time_ms": 1791672600000,
+      "total_matches": true,
+      "total_volume_difference": "0.0000"
+    },
+    {
+      "buy_matches": true,
+      "buy_volume_difference": "0.0000",
+      "open_time_ms": 1791672900000,
+      "total_matches": true,
+      "total_volume_difference": "0.0000"
+    }
+  ],
+  "taker_open_semantics_verified": true,
+  "saved_capture_checks": {
+    "jsonl_sqlite_replay_identical": true,
+    "timestamps_and_payload_preserved": true,
+    "live_replay_fields_match": true,
+    "kraken_event_after_exchange_ms": 526
+  },
+  "verification_branch": "fix/12-live-snapshot-replay"
+}
