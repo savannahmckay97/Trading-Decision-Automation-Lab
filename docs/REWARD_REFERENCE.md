@@ -143,3 +143,55 @@ quality.
 - Entry reference is the completed research close, not a causal arrival price.
 - No Kraken translation of the level (USD/USDT parity is not assumed).
 - Live output cannot be demonstrated until issue #7 (taker/OI freshness) is fixed.
+
+## 7. Coverage study (2026-10-11): why the window was not simply lengthened
+
+On the 29-day exploratory window, 8 of 17 `LONG_ELIGIBLE` setups had no
+reference. The 17 fixed setups were re-scored under alternative level
+definitions, using 45 days of 15m klines. Only **availability and distance to
+the level** were measured. No outcome was looked at, and these windows'
+outcomes were already examined under the current definition, so **no variant
+can be evaluated on this data**. Every variant tried is listed below.
+Scripts: `research/reward_coverage/`.
+
+| Variant | Available | Reward to level, ATR (sorted) |
+|---|---|---|
+| 15m k=2, 144 bars / 1.5 d (current) | 9/17 | 0.1, 0.2, 0.2, 0.5, 0.9, 2.1, 3.2, 3.8, 4.4 |
+| 15m k=2, 499 bars / 5.2 d | 15/17 | four at 0.0, then 0.1 … 4.4 |
+| 15m k=2, 999 bars / 10.4 d | 17/17 | six at 0.0, then 0.1 … 4.4 |
+| 15m k=2, 1499 bars / 15.6 d | 17/17 | six at 0.0, then 0.1 … 4.4 |
+| 1h k=2 (exact 15m aggregation), 7 d | 15/17 | 0.0, 0.0, 0.1 … 4.9 |
+| 4h k=2 (exact 15m aggregation), 7 d | 15/17 | 0.4, 0.7, 0.9, 1.4 … 11.4 |
+| 4h k=2 (exact 15m aggregation), 14 d | 17/17 | 0.4, 0.7, 0.9, 1.4 … 11.4 |
+
+(0.0 means under 0.05 ATR, which is well inside one bar's range.)
+
+Findings:
+
+- **Lengthening the 15m search fills coverage with noise.** A k=2 swing high on
+  15m bars is a minor level. Over several days there is almost always one just
+  above price, so 6 of 17 targets collapse to under 0.05 ATR. Coverage rises
+  but meaning falls. Rejected.
+- **1h pivots still admit trivial levels.**
+- **4h pivots are structural** (minimum 0.4 ATR, 14-day coverage 17/17), but
+  they skip the nearer 15m obstacles, so they overstate the reward. That is the
+  direction §3 deliberately avoids.
+
+No single timeframe dominates. **Recommendation (not implemented):** keep the
+current 15m/36 h reference as the primary, conservative `reward_reference`.
+Add a separately labelled **structural reference**, the nearest 4h k=2 swing
+high within 14 days with its own gross ratio, reported alongside it and never
+substituted for it. Before any new outcome is examined, preregister which one
+is primary in prospective evaluation.
+
+Implementation is deferred because both routes are costly or collide with
+issue #7:
+
+- **Raise `candle_limit` to about 1,350.** No code change, but each stored
+  snapshot grows about 9× (roughly 290 MB/day at 60 s polling), and the kline
+  request weight rises from 2 to 10.
+- **Add a 4h kline request (limit about 84).** Cheap to store, but it needs
+  collector, normalization, snapshot-schema and as-of changes, which is the
+  same code the issue #7 fix will change.
+
+The second route is preferable, done after issue #7 lands.
