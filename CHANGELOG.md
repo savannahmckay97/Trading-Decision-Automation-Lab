@@ -1,5 +1,7 @@
 # Changelog
 
+PR #5 review fixes: preserve supported manifest versions and source metadata through outcome/paper validation; reject future auxiliary rows, invalid quantity ranges, malformed candle intervals and mismatched provenance. Added downstream CLI and snapshot regressions.
+
 All versions belong only to the independent **Trading Decision Automation Lab** project.
 
 ## Unreleased — historical ingestion and persisted snapshot boundary

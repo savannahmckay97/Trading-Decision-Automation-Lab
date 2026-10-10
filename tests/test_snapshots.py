@@ -101,6 +101,56 @@ class SnapshotBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ReplayError, "stored snapshot"):
                 list(load_sqlite_snapshots(db))
 
+    def test_auxiliary_rows_after_exchange_cutoff_are_rejected(self):
+        for name in ("open_interest_5m", "taker_flow_5m", "funding_history", "global"):
+            with self.subTest(name=name):
+                item = full_snapshot()
+                item["observed_at_ms"] += 1000
+                rows = item["positioning"][name] if name == "global" else item[name]
+                rows[-1]["timestamp_ms"] = item["exchange_time_ms"] + 1
+                with self.assertRaisesRegex(SnapshotError, "future input"):
+                    decode_snapshot(item)
+                with self.assertRaises(ReplayError):
+                    ReplayRunner(ObserverConfig()).run([item])
+
+    def test_market_quantity_ranges_fail_closed(self):
+        cases = [("open_interest_5m", "open_interest", "-1"),
+                 ("open_interest_5m", "open_interest_value", "-1"),
+                 ("taker_flow_5m", "buy_volume", "-1"),
+                 ("taker_flow_5m", "sell_volume", "-1"),
+                 ("global", "long_share", "1.1"),
+                 ("global", "short_share", "-0.1"),
+                 ("global", "long_short_ratio", "0"),
+                 ("candles_15m", "volume", "-1"),
+                 ("candles_15m", "low", "0")]
+        for name, field, value in cases:
+            with self.subTest(name=name, field=field):
+                item = full_snapshot()
+                rows = item["positioning"][name] if name == "global" else item[name]
+                rows[-1][field] = value
+                with self.assertRaises(SnapshotError):
+                    decode_snapshot(item)
+                with self.assertRaises(ReplayError):
+                    ReplayRunner(ObserverConfig()).run([item])
+
+    def test_early_close_and_invalid_ohlc_are_rejected(self):
+        for field, value in (("close_time_ms", 1), ("high", Decimal("1"))):
+            item = full_snapshot()
+            item["candles_15m"][-1][field] = value
+            with self.assertRaises(SnapshotError):
+                decode_snapshot(item)
+
+    def test_provenance_identity_and_availability_are_checked(self):
+        for endpoint in ("binance_klines", "kraken_ticker"):
+            for field, value in (("source", "wrong_venue"), ("endpoint", "wrong_endpoint"),
+                                 ("symbol", "BTCUSDT"), ("received_time_ms", "future")):
+                with self.subTest(endpoint=endpoint, field=field):
+                    item = full_snapshot()
+                    item["provenance"][endpoint][field] = (
+                        item["observed_at_ms"] + 1 if value == "future" else value)
+                    with self.assertRaises(SnapshotError):
+                        decode_snapshot(item)
+
     def test_decode_does_not_mutate_input(self):
         item = full_snapshot()
         original = deepcopy(item)

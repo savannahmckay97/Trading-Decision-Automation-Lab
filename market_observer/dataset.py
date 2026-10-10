@@ -23,8 +23,11 @@ class DatasetError(ValueError):
 def build_dataset_artifact(
     snapshots: Iterable[dict[str, Any]], *, source: str,
     source_metadata: dict[str, Any] | None = None,
+    dataset_version: str = DATASET_VERSION,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate and fingerprint snapshots without sorting away chronology evidence."""
+    if dataset_version not in {DATASET_VERSION, "trading-decision-lab-dataset-0.1.0"}:
+        raise DatasetError("unsupported dataset version")
     rows: list[dict[str, Any]] = []
     previous_observed: int | None = None
     previous_exchange: int | None = None
@@ -76,7 +79,7 @@ def build_dataset_artifact(
 
     research_symbol, executable_pair = next(iter(identities))
     baseline = {
-        "dataset_version": DATASET_VERSION,
+        "dataset_version": dataset_version,
         "source": source,
         "snapshot_count": len(rows),
         "research_symbol": research_symbol,
@@ -100,6 +103,22 @@ def build_dataset_artifact(
         },
     }
     return rows, manifest
+
+
+def validate_dataset_manifest(
+    snapshots: Iterable[dict[str, Any]], manifest: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Rebuild the declared supported baseline, retaining acquisition metadata."""
+    source = manifest.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise DatasetError("manifest source is required")
+    rows, rebuilt = build_dataset_artifact(
+        snapshots, source=source, source_metadata=manifest.get("source_metadata"),
+        dataset_version=manifest.get("dataset_version"),
+    )
+    if rebuilt != manifest:
+        raise DatasetError("dataset manifest does not match snapshot JSONL")
+    return rows, rebuilt
 
 
 def write_dataset(
