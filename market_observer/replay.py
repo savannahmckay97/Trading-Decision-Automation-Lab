@@ -325,12 +325,25 @@ def parser() -> argparse.ArgumentParser:
     source.add_argument("--db", help="observer SQLite database input")
     result.add_argument("--base", default="TAO", help="base asset; TAO by default")
     result.add_argument("--output", required=True, help="immutable replay-result JSON path")
+    result.add_argument("--fee-bps-per-side", type=float, default=None,
+                        help="assumed exchange fee per side for the risk contract; unknown if omitted")
+    result.add_argument("--slippage-bps-per-side", type=float, default=None,
+                        help="assumed slippage per side for the risk contract; unknown if omitted")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    config = ObserverConfig(base_asset=args.base.upper(), mode="historical_replay")
+    config = ObserverConfig(
+        base_asset=args.base.upper(),
+        mode="historical_replay",
+        fee_bps_per_side=args.fee_bps_per_side,
+        slippage_bps_per_side=args.slippage_bps_per_side,
+    )
+    try:
+        config.validate()
+    except ValueError as exc:
+        parser().error(str(exc))
     snapshots = (
         load_jsonl_snapshots(args.jsonl)
         if args.jsonl

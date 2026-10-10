@@ -1,7 +1,7 @@
 # Verification — decision risk contract, 10 October 2026
 
-- **136/136 deterministic tests passed locally on Python 3.13.5 on top of integrated `main` (`813224c`)**; specification validation passed (21 rules, 49 raw/config fields, 18 derived fields).
-- 17 new tests (including as-of rejection withholding risk) in `tests/test_decision_risk.py`: close-based invalidation from frozen breakout levels, setup window, separate spread/fee/slippage/funding components with unknown costs never treated as zero, not-applicable/withheld/unavailable fail-closed states, persisted-string parity, live/replay parity, and absence of any quantity, notional or execution permission.
+- **138/138 deterministic tests passed locally on Python 3.13.5 on top of integrated `main` (`813224c`)**; specification validation passed (21 rules, 49 raw/config fields, 18 derived fields).
+- 19 new tests (including as-of rejection withholding risk) in `tests/test_decision_risk.py`: replay CLI cost flags recorded in the risk contract and configuration identity, negative CLI costs rejected, close-based invalidation from frozen breakout levels, setup window, separate spread/fee/slippage/funding components with unknown costs never treated as zero, not-applicable/withheld/unavailable fail-closed states, persisted-string parity, live/replay parity, and absence of any quantity, notional or execution permission.
 - 20 reward-reference tests in `tests/test_reward_reference.py`: selection, missing/invalid targets, gap/duplicate/OHLCV handling, look-ahead (open/future candles, prefix parity), blocked-cycle withholding, eligibility invariance. Real-data plumbing check on 149 live TAOUSDT bars: see `docs/REWARD_REFERENCE.md` §5.
 - Fixtures are synthetic. The contract describes setup geometry only; it is not evidence of stop quality, bounded loss or predictive value. Python 3.10/3.12 CI must still pass.
 

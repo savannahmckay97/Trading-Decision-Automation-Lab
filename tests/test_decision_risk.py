@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from decimal import Decimal
 
@@ -11,6 +14,7 @@ from market_observer.engine import default_setup_state
 from market_observer.evaluator import evaluate_snapshot
 from market_observer.normalization import build_snapshot
 from market_observer.replay import ReplayRunner
+from market_observer.replay import main as replay_main
 from market_observer.service import ObserverService
 from market_observer.storage import EventStore
 from market_observer.util import canonical_json
@@ -201,6 +205,32 @@ class DecisionRiskTests(unittest.TestCase):
         self.assertEqual(decision["sequence"]["status"], "ASOF_INVALID")
         self.assertEqual(decision["risk"]["status"], "WITHHELD_BLOCKED")
         self.assertNotIn("invalidation", decision["risk"])
+
+    def test_replay_cli_records_cost_assumptions(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = f"{root}/snapshots.jsonl"
+            with open(source, "w", encoding="utf-8") as handle:
+                handle.write(canonical_json(snapshot("breakout")) + "\n")
+            with redirect_stdout(io.StringIO()):
+                replay_main(["--jsonl", source, "--output", f"{root}/costed.json",
+                             "--fee-bps-per-side", "5", "--slippage-bps-per-side", "2.5"])
+                replay_main(["--jsonl", source, "--output", f"{root}/plain.json"])
+            with open(f"{root}/costed.json", encoding="utf-8") as handle:
+                costed = json.load(handle)
+            with open(f"{root}/plain.json", encoding="utf-8") as handle:
+                plain = json.load(handle)
+        costs = costed["decisions"][0]["risk"]["costs"]
+        self.assertEqual(costs["fees"]["status"], "CONFIGURED_ASSUMPTION")
+        self.assertEqual(Decimal(str(costs["slippage"]["round_trip_bps"])), Decimal("5"))
+        self.assertEqual(costed["baseline"]["configuration"]["fee_bps_per_side"], 5)
+        self.assertEqual(plain["decisions"][0]["risk"]["costs"]["fees"]["status"], "NOT_SUPPLIED")
+        self.assertNotEqual(costed["baseline"]["configuration_id"], plain["baseline"]["configuration_id"])
+
+    def test_replay_cli_rejects_negative_cost(self):
+        with tempfile.TemporaryDirectory() as root, self.assertRaises(SystemExit) as raised:
+            replay_main(["--jsonl", f"{root}/unused.jsonl", "--output", f"{root}/out.json",
+                         "--fee-bps-per-side", "-1"])
+        self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

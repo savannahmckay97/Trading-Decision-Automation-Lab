@@ -41,7 +41,7 @@ otherwise be derived from inputs that failed a gate.
 - `costs`: each component kept separate, with its own status:
   - `spread`: signal-time Kraken quote, round-trip bps (`OBSERVED_SIGNAL_TIME_PROXY`);
   - `fees`, `slippage`: per-side bps from `ObserverConfig.fee_bps_per_side` /
-    `slippage_bps_per_side` (observer CLI `--fee-bps-per-side`,
+    `slippage_bps_per_side` (observer and replay CLI `--fee-bps-per-side`,
     `--slippage-bps-per-side`). Unset means `NOT_SUPPLIED`, **never zero**; an
     explicit `0` is a `CONFIGURED_ASSUMPTION`;
   - `funding`: always `NOT_MODELLED`.
@@ -52,8 +52,7 @@ otherwise be derived from inputs that failed a gate.
   what is missing (e.g. `INCOMPLETE_MISSING_FEES_SLIPPAGE`). It is additive bps,
   excludes funding and gap-through, and is never labelled net. The cost
   assumptions are part of `ObserverConfig.public_dict()` and so of the
-  replay `configuration_id`. Replay CLI flags wait for the PR #2/#3/#5
-  integration because `replay.py` is under reconciliation.
+  replay `configuration_id`.
 - `setup_window.last_evaluable_close_time_ms`: last completed close at which the
   setup can still qualify (breakout close + `expiry_bars` intervals), or the
   current close once `LONG_ELIGIBLE` (terminal).

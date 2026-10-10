@@ -118,6 +118,8 @@ python -m market_observer.replay \
   --output results/tao_replay.json
 ```
 
+Add `--fee-bps-per-side` and `--slippage-bps-per-side` to record cost assumptions in each decision's `risk` contract, as for the observer. Omitted costs are reported as not supplied, never zero, and the assumptions are part of the replay `configuration_id`.
+
 Replay input must already be chronological and must preserve the data actually available at each historical instant. The runner rejects reversed chronology, records duplicate and missing completed bars, resets an active setup across a detected gap, and refuses to overwrite a prior result file.
 
 JSONL and SQLite loaders restore declared decimal fields exactly. Dataset and
