@@ -67,8 +67,10 @@ class PublicCollectors:
     def __init__(self, config: ObserverConfig, client: JsonHttpClient | None = None) -> None:
         self.config = config
         self.client = client or JsonHttpClient(config.request_timeout_seconds, config.request_attempts)
+        self.completed_at_ms: int | None = None
 
     def collect(self) -> tuple[dict[str, RawEvent], list[CollectionError]]:
+        self.completed_at_ms = None
         specs = self._specifications()
         events: dict[str, RawEvent] = {}
         errors: list[CollectionError] = []
@@ -89,6 +91,8 @@ class PublicCollectors:
                             detail=f"{type(exc).__name__}: {exc}",
                         )
                     )
+        # Every request (including optional failures/retries) has now finished.
+        self.completed_at_ms = now_ms()
         return events, sorted(errors, key=lambda item: item.endpoint)
 
     def _specifications(self) -> list[tuple]:

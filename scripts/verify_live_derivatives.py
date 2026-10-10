@@ -25,8 +25,10 @@ def main() -> None:
     directory = Path(sys.argv[1])
     directory.mkdir(parents=True, exist_ok=True)
     config = ObserverConfig()
-    events, errors = PublicCollectors(config).collect()
-    snapshot = build_snapshot(events, errors, config.research_symbol, config.executable_pair)
+    collectors = PublicCollectors(config)
+    events, errors = collectors.collect()
+    snapshot = build_snapshot(events, errors, config.research_symbol, config.executable_pair,
+                              completed_at_ms=collectors.completed_at_ms)
     summary = {"checked_at_utc": datetime.now(timezone.utc).isoformat(),
                "collection_errors": [error.record() for error in errors]}
     try:
@@ -46,6 +48,8 @@ def main() -> None:
             summary["replay_features_match"] = False
             summary["replay_error"] = str(exc)
         class CollectedOnce:
+            completed_at_ms = collectors.completed_at_ms
+
             def collect(self):
                 return events, errors
         with EventStore(":memory:") as store:

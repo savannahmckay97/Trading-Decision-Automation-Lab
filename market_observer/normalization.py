@@ -13,8 +13,21 @@ def build_snapshot(
     errors: list[CollectionError],
     research_symbol: str,
     executable_pair: str,
+    *,
+    completed_at_ms: int | None = None,
 ) -> dict[str, Any]:
-    observed = max((event.received_time_ms for event in events.values()), default=now_ms())
+    receipts = [event.received_time_ms for event in events.values()]
+    receipts.extend(error.received_time_ms for error in errors)
+    if completed_at_ms is not None:
+        if type(completed_at_ms) is not int or completed_at_ms < 0:
+            raise ValueError("collection completion must be non-negative integer milliseconds")
+        if any(receipt > completed_at_ms for receipt in receipts):
+            raise ValueError("collection completion is before a response receipt")
+        observed = completed_at_ms
+    else:
+        # Direct callers without a collection boundary must at least include
+        # late failures. The live service supplies actual collection completion.
+        observed = max(receipts) if receipts else now_ms()
     exchange_time = _value(events, "binance_time", "serverTime") or observed
     price = _payload(events, "binance_price") or {}
     kraken = _kraken_ticker(_payload(events, "kraken_ticker"))
