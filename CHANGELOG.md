@@ -1,6 +1,14 @@
 # Changelog
 
+PR #2 review fixes: censor outcome paths first received after the declared window; reject duplicate, gapped or insufficient 5-minute derivative histories. Regression suite: 55 tests.
+
 All versions belong only to the independent **Trading Decision Automation Lab** project.
+
+## Unreleased — evaluation-first direction
+
+- Add frozen-dataset-bound descriptive decision evaluation against simple selection baselines, with missing/censored outcomes and abstention trade-offs disclosed.
+- Restore decimal fields when replaying saved JSONL/SQLite snapshots; verify persistence-to-replay parity.
+- Document the constrained MVP, product assumptions, causal limitations and evaluation-driven advancement gates.
 
 ## v0.2.0 — historical decision replay
 
