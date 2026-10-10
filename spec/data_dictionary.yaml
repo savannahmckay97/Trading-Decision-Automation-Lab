@@ -158,7 +158,9 @@ fields:
     endpoint_family: open_interest_history
     unit: TAO_contract_equivalent
     minimum_points: 13
-    freshness_ms: 360000
+    freshness_ms: 15000
+    freshness_basis: endpoint_received_time
+    alignment: exact_completed_15m_candle_window
     required_by: [T1_OI_CHANGE]
 
   series.binance_open_interest.timestamp:
@@ -167,25 +169,33 @@ fields:
     endpoint_family: open_interest_history
     unit: ms
     minimum_points: 13
-    freshness_ms: 360000
+    freshness_ms: 15000
+    freshness_basis: endpoint_received_time
+    alignment: exact_completed_15m_candle_window
     required_by: [T1_OI_CHANGE]
 
   series.binance_taker.buy_volume:
     type: array_decimal
     source: binance_public
     endpoint_family: taker_buy_sell_volume
+    timestamp_semantics: bucket_open
     unit: TAO
-    minimum_points: 13
-    freshness_ms: 360000
+    minimum_points: 3
+    freshness_ms: 15000
+    freshness_basis: endpoint_received_time
+    alignment: exact_completed_15m_candle_window
     required_by: [T1_TAKER_FLOW]
 
   series.binance_taker.sell_volume:
     type: array_decimal
     source: binance_public
     endpoint_family: taker_buy_sell_volume
+    timestamp_semantics: bucket_open
     unit: TAO
-    minimum_points: 13
-    freshness_ms: 360000
+    minimum_points: 3
+    freshness_ms: 15000
+    freshness_basis: endpoint_received_time
+    alignment: exact_completed_15m_candle_window
     required_by: [T1_TAKER_FLOW]
 
   series.binance_funding.rate:

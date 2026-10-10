@@ -1,3 +1,13 @@
+# Verification — issue #7 derivative alignment, 10 October 2026
+
+- 154 deterministic tests pass after integrating current main (PR #6 and #8).
+- Specification validation and git diff --check pass.
+- Public live check: missing final bucket blocked; publication arrival passed.
+  Production observer returned NO_TRADE / NO_ORDER with all gates passing.
+- Missing-row diagnostics block; provider volume discrepancies and the existing
+  saved-snapshot replay-envelope limitation are disclosed in
+  [contract and evidence](docs/DERIVATIVE_CANDLE_ALIGNMENT.md).
+
 # Verification — decision risk contract, 10 October 2026
 
 - **148/148 deterministic tests passed locally on Python 3.13.5 with evaluation 0.2 (10 new first-touch tests in `tests/test_evaluation.py`, including mean-ratio breakeven and realised R)**; specification validation passed.

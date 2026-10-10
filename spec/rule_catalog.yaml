@@ -246,10 +246,10 @@ rules:
   - rule_id: T1_OI_CHANGE
     version: 1
     tier: 1
-    purpose: Measure fresh derivatives positioning over fixed windows.
+    purpose: Measure derivatives positioning at exact completed-candle boundaries.
     horizon: [15m, 60m]
     inputs: [series.binance_open_interest.value, series.binance_open_interest.timestamp]
-    calculation: "oi_change_pct_h = 100 * (oi_now / oi_h_ago - 1)"
+    calculation: "oi_change_pct_h = 100 * (oi_at_completed_candle_end / oi_at_exact_h_lookback - 1); require continuous 5m points through the end"
     condition: always
     action: annotate
     output_fields: [feature.oi_change_15m_pct, feature.oi_change_60m_pct]
@@ -259,12 +259,13 @@ rules:
   - rule_id: T1_TAKER_FLOW
     version: 1
     tier: 1
-    purpose: Quantify aggressive buy and sell flow.
+    purpose: Quantify aggressive buy and sell flow over the completed 15m candle.
     horizon: [5m, 15m, 60m]
     inputs: [series.binance_taker.buy_volume, series.binance_taker.sell_volume]
     calculation: >-
-      taker_ratio = buy_volume / max(sell_volume, epsilon);
-      buy_share = buy_volume / max(buy_volume + sell_volume, epsilon)
+      Require bucket opens at candle_open, candle_open + 5m, candle_open + 10m;
+      sum only those three buckets. taker_ratio = buy_volume / sell_volume;
+      buy_share = buy_volume / (buy_volume + sell_volume); fail closed on invalid denominators
     condition: always
     action: annotate
     output_fields: [feature.taker_ratio, feature.taker_buy_share]

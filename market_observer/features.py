@@ -29,9 +29,19 @@ def calculate_features(snapshot: dict[str, Any], config: ObserverConfig) -> dict
     support = min(row["low"] for row in prior_levels)
     return_15m = ONE_HUNDRED * (current["close"] / previous["close"] - Decimal("1"))
     volume_percentile = percentile_rank(current["volume"], [row["volume"] for row in volume_reference])
-    oi_15 = _change_over(snapshot["open_interest_5m"], "open_interest", 15 * 60_000)
-    oi_60 = _change_over(snapshot["open_interest_5m"], "open_interest", 60 * 60_000)
-    taker = _taker_window(snapshot["taker_flow_5m"], 3)
+    # Binance taker timestamps mark bucket opens; OI timestamps are points.
+    # Close timestamps are inclusive, so the end boundary is close + 1 ms.
+    boundary = int(current["open_time_ms"]) + config.interval_ms
+    if int(current["close_time_ms"]) != boundary - 1:
+        raise FeatureError("invalid completed candle boundary")
+    expected_open = (int(snapshot["exchange_time_ms"]) // config.interval_ms - 1) * config.interval_ms
+    if int(current["open_time_ms"]) != expected_open:
+        raise FeatureError("latest completed candle is missing or misaligned")
+    oi_window = _aligned_window(snapshot["open_interest_5m"], boundary - 60 * 60_000, boundary, "open-interest")
+    oi_15 = _change_over(oi_window, "open_interest", 15 * 60_000)
+    oi_60 = _change_over(oi_window, "open_interest", 60 * 60_000)
+    taker_window = _aligned_window(snapshot["taker_flow_5m"], int(current["open_time_ms"]), boundary - 300_000, "taker-flow")
+    taker = _taker_window(taker_window, 3)
     funding = _funding(snapshot["funding_history"], config.funding_history_points)
     market = snapshot["market"]
     spread = _spread_bps(market.get("kraken_bid_price"), market.get("kraken_ask_price"))
@@ -119,27 +129,31 @@ def percentile_rank(value: Decimal, reference: list[Decimal]) -> Decimal:
     return Decimal(sum(item <= value for item in reference)) / Decimal(len(reference))
 
 
+def _aligned_window(rows: list[dict[str, Any]], start: int, end: int, name: str) -> list[dict[str, Any]]:
+    window = sorted((row for row in rows if start <= int(row["timestamp_ms"]) <= end),
+                    key=lambda row: int(row["timestamp_ms"]))
+    if [row["timestamp_ms"] for row in window] != list(range(start, end + 1, 300_000)):
+        raise FeatureError(f"{name}: missing, duplicate or misaligned candle-window data")
+    return window
+
+
 def _change_over(rows: list[dict[str, Any]], field: str, window_ms: int) -> Decimal:
-    if len(rows) < 2:
-        raise FeatureError("open-interest history is incomplete")
-    rows = sorted(rows, key=lambda item: int(item["timestamp_ms"]))
     latest = rows[-1]
     target = int(latest["timestamp_ms"]) - window_ms
-    candidates = [row for row in rows[:-1] if int(row["timestamp_ms"]) <= target]
-    if not candidates:
-        raise FeatureError(f"no open-interest value at or before {window_ms // 60000}m lookback")
-    past = candidates[-1][field]
-    if past <= ZERO:
-        raise FeatureError("open-interest denominator must be positive")
+    past = next(row[field] for row in rows if row["timestamp_ms"] == target)
+    if any(not row[field].is_finite() or row[field] <= ZERO for row in rows):
+        raise FeatureError("open-interest values must be finite and positive")
     return ONE_HUNDRED * (latest[field] / past - Decimal("1"))
 
 
 def _taker_window(rows: list[dict[str, Any]], points: int) -> dict[str, Decimal]:
-    if len(rows) < points:
+    if len(rows) != points:
         raise FeatureError("taker-flow history is incomplete")
-    window = sorted(rows, key=lambda item: int(item["timestamp_ms"]))[-points:]
-    buy = sum((row["buy_volume"] for row in window), ZERO)
-    sell = sum((row["sell_volume"] for row in window), ZERO)
+    if any(not row[field].is_finite() or row[field] < ZERO
+           for row in rows for field in ("buy_volume", "sell_volume")):
+        raise FeatureError("taker-flow volumes must be finite and non-negative")
+    buy = sum((row["buy_volume"] for row in rows), ZERO)
+    sell = sum((row["sell_volume"] for row in rows), ZERO)
     total = buy + sell
     if total <= ZERO or sell <= ZERO:
         raise FeatureError("taker-flow denominator must be positive")

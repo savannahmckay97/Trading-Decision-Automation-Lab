@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import tempfile
 import unittest
 from decimal import Decimal
@@ -19,7 +20,7 @@ from market_observer.storage import EventStore, default_database_path, restore_d
 from market_observer.util import canonical_json
 
 
-BASE_TIME = 2_000_000_000_000
+BASE_TIME = 1_999_999_800_000
 INTERVAL = 900_000
 
 
@@ -38,16 +39,17 @@ def payloads(stage="flat", spread=False, missing=None):
             values = (103, 103.5, 100.8, 101.5, 20)
         rows.append(kline(BASE_TIME + i * INTERVAL, *values))
     last_close = Decimal(str(rows[-1][4]))
-    exchange_time = BASE_TIME + complete_count * INTERVAL + 1_000
+    exchange_time = BASE_TIME + complete_count * INTERVAL + 194_000
     rows.append(kline(BASE_TIME + complete_count * INTERVAL, last_close, last_close + 1, last_close - 1, last_close, 5))
-    five_minute_times = [exchange_time - (29 - i) * 300_000 - 60_000 for i in range(30)]
+    boundary = BASE_TIME + complete_count * INTERVAL
+    five_minute_times = [boundary - (29 - i) * 300_000 for i in range(30)]
     oi = [
         {"symbol": "TAOUSDT", "sumOpenInterest": str(1000 + i * 2), "sumOpenInterestValue": str(100_000 + i), "timestamp": ts}
         for i, ts in enumerate(five_minute_times)
     ]
     taker = [
         {"buySellRatio": "2.333", "buyVol": "70", "sellVol": "30", "timestamp": ts}
-        for ts in five_minute_times
+        for ts in five_minute_times[:-1]
     ]
     funding = [
         {"symbol": "TAOUSDT", "fundingTime": exchange_time - (99 - i) * 28_800_000, "fundingRate": str(Decimal(i - 50) / Decimal("100000"))}
@@ -235,6 +237,99 @@ class ServiceTests(unittest.TestCase):
             decision = service.cycle()
             self.assertEqual(decision["signal"], "RISK_BLOCKED")
             self.assertEqual(decision["setup"]["state"], "IDLE")
+
+
+class DerivativeAlignmentTests(unittest.TestCase):
+    def snapshot(self, delay=194_000):
+        events, errors = events_for("breakout")
+        row = build_snapshot(events, errors, "TAOUSDT", "TAOUSD")
+        boundary = row["candles_15m"][-2]["close_time_ms"] + 1
+        row["observed_at_ms"] = row["exchange_time_ms"] = boundary + delay
+        for name, event in row["provenance"].items():
+            event["received_time_ms"] = row["observed_at_ms"]
+            if name in {"binance_time", "binance_price", "binance_book", "binance_oi", "kraken_ticker"}:
+                event["event_time_ms"] = row["observed_at_ms"]
+        return row
+
+    def test_realistic_publication_delays_pass_and_repeated_polls_freeze(self):
+        prior = None
+        for delay in (194_000, 444_000, 777_000):
+            with self.subTest(delay=delay):
+                row = self.snapshot(delay)
+                result = evaluate_snapshot(row, ObserverConfig(), prior)
+                self.assertEqual(result.signal, "WATCH_LONG")
+                self.assertEqual(result.state_updated, prior is None)
+                self.assertEqual(result.features["taker_buy_share"], Decimal("0.7"))
+                prior = result.state
+                self.assertEqual(ReplayRunner(ObserverConfig()).run([row])["decisions"][0]["features"], result.features)
+
+    def test_newer_published_rows_do_not_shift_candle_features(self):
+        row = self.snapshot(777_000)
+        baseline = calculate_features(row, ObserverConfig())
+        end = row["candles_15m"][-2]["close_time_ms"] + 1
+        for timestamp in (end, end + 300_000):
+            row["taker_flow_5m"].append({"timestamp_ms": timestamp, "buy_volume": Decimal("1"), "sell_volume": Decimal("999")})
+        for timestamp in (end + 300_000, end + 600_000):
+            row["open_interest_5m"].append({"timestamp_ms": timestamp, "open_interest": Decimal("999999")})
+        for endpoint, series in (("binance_taker", "taker_flow_5m"), ("binance_oi_history", "open_interest_5m")):
+            row["provenance"][endpoint]["event_time_ms"] = row[series][-1]["timestamp_ms"]
+        result = evaluate_snapshot(row, ObserverConfig(), None)
+        self.assertEqual(result.features, baseline)
+
+    def test_missing_boundary_or_bucket_blocks_until_published_and_survives_restart(self):
+        for endpoint in ("binance_taker", "binance_oi_history"):
+            with self.subTest(endpoint=endpoint), tempfile.TemporaryDirectory() as directory:
+                complete, errors = events_for("breakout")
+                pending = deepcopy(complete)
+                event = pending[endpoint]
+                pending[endpoint] = RawEvent(event.source, event.endpoint, event.symbol,
+                    event.payload[-2]["timestamp"], event.received_time_ms,
+                    event.payload[:-1], event.critical)
+                path = Path(directory) / "observer.sqlite"
+                with EventStore(path) as store:
+                    blocked = ObserverService(ObserverConfig(), store, SequenceCollectors([(pending, errors)])).cycle()
+                    self.assertEqual(blocked["signal"], "DATA_STALE")
+                    self.assertFalse(blocked["setup"]["state_updated"])
+                with EventStore(path) as store:
+                    service = ObserverService(ObserverConfig(), store, SequenceCollectors([events_for("breakout", received_offset=1), events_for("breakout", received_offset=2)]))
+                    published = service.cycle()
+                    self.assertEqual(published["signal"], "WATCH_LONG")
+                    self.assertTrue(published["setup"]["state_updated"])
+                    self.assertFalse(service.cycle()["setup"]["state_updated"])
+
+    def test_required_window_rejects_missing_duplicate_shifted_and_malformed_values(self):
+        for series in ("open_interest_5m", "taker_flow_5m"):
+            for fault in ("missing", "duplicate", "shifted", "negative", "nonfinite"):
+                with self.subTest(series=series, fault=fault):
+                    row = self.snapshot()
+                    rows = row[series]
+                    if fault == "missing":
+                        del rows[-2]
+                    elif fault == "duplicate":
+                        rows.append(deepcopy(rows[-2]))
+                    elif fault == "shifted":
+                        for item in rows:
+                            item["timestamp_ms"] -= 60_000
+                    else:
+                        field = "open_interest" if series == "open_interest_5m" else "buy_volume"
+                        rows[-2][field] = Decimal("-1" if fault == "negative" else "NaN")
+                    with self.assertRaises(ValueError):
+                        evaluate_snapshot(row, ObserverConfig(), None)
+
+    def test_fresh_receipts_cannot_rescue_previous_candle(self):
+        row = self.snapshot()
+        del row["candles_15m"][-2]
+        with self.assertRaises(FeatureError):
+            calculate_features(row, ObserverConfig())
+
+    def test_aligned_derivatives_with_stale_receipts_still_block(self):
+        for endpoint in ("binance_taker", "binance_oi_history"):
+            with self.subTest(endpoint=endpoint):
+                row = self.snapshot()
+                row["provenance"][endpoint]["received_time_ms"] -= 15_001
+                result = evaluate_snapshot(row, ObserverConfig(), None)
+                self.assertEqual(result.signal, "DATA_STALE")
+                self.assertFalse(result.state_updated)
 
 
 class SafetyTests(unittest.TestCase):

@@ -194,7 +194,7 @@ python -m market_observer.evaluation \
   --output results/tao_decision_evaluation.json
 ```
 
-Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Provider timing semantics, synchronized derivative windows and real user benefit still require validation.
+Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Derivative windows now use exact completed-candle boundaries; broader provider timing semantics and real user benefit still require validation.
 
 Evaluation 0.2 also labels each TDAL selection by whether its reward reference or its invalidation is reached first. See [evaluation readiness](docs/EVALUATION_READINESS.md) for why no real dataset can yet produce TDAL selections, and the measured setup frequency.
 
@@ -202,15 +202,13 @@ See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigatio
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 148 tests covering live/replay guards, the
-per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
-manifest compatibility, outcome/paper workflows and descriptive evaluation.
-GitHub Actions runs the suite plus specification validation on Python 3.10 and
-3.12. The ingestion implementation's Binance request returned HTTP 451. A
-later live probe from another network reached both providers, but found the
-live observer can only emit `DATA_STALE` because the 5m taker/OI freshness
-limits cannot be met (issue #7); successful live decision output remains
-unverified. No credential is used
+The integrated deterministic suite includes 154 tests covering live/replay guards,
+the per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion,
+immutable datasets, legacy manifest compatibility, outcome/paper workflows and
+descriptive evaluation. GitHub Actions runs the suite plus specification validation
+on Python 3.10 and 3.12. The ingestion implementation's Binance request returned
+HTTP 451; issue #7 now has a successful read-only live provider check and exact
+derivative candle alignment (see [contract and live evidence](docs/DERIVATIVE_CANDLE_ALIGNMENT.md)). No credential is used
 and no order route exists.
 
-Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.
+Next expand provider timing/identity validation and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.

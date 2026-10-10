@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — issue #7
+
+- Align taker buckets and OI changes to exact completed 15-minute candle boundaries.
+- Wait fail closed for delayed publication; keep fresh receipt and latest-candle requirements.
+- Add realistic publication-delay tests and a public live verification probe with recorded evidence.
+
 PR #5 review fixes: preserve supported manifest versions and source metadata through outcome/paper validation; reject future auxiliary rows, invalid quantity ranges, malformed candle intervals and mismatched provenance. Added downstream CLI and snapshot regressions.
 
 All versions belong only to the independent **Trading Decision Automation Lab** project.

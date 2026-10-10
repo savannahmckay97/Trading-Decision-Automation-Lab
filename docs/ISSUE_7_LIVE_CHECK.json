@@ -1,0 +1,137 @@
+{
+  "waiting": {
+    "action": "NO_ORDER",
+    "checked_at_utc": "2026-10-10T19:32:52.078876+00:00",
+    "collection_errors": [],
+    "detail": "taker-flow: missing, duplicate or misaligned candle-window data",
+    "signal": "DATA_STALE"
+  },
+  "published": {
+    "action": "NO_ORDER",
+    "checked_at_utc": "2026-10-10T19:39:46.819111+00:00",
+    "collection_errors": [],
+    "completed_boundary_ms": 1791660600000,
+    "execution_permission": "DENIED_OBSERVATION_ONLY",
+    "features": {
+      "atr_15m": "1.339967555123983381745990754",
+      "atr_method": "wilder_rma",
+      "completed_15m": true,
+      "completed_candle_close_time_ms": 1791660599999,
+      "completed_candle_open_time_ms": 1791659700000,
+      "completed_close": "285.53",
+      "completed_high": "286.48",
+      "completed_low": "284.68",
+      "completed_open": "284.68",
+      "cross_venue_divergence_bps": "0.7979600222028876353294699936",
+      "funding_percentile": "1",
+      "funding_rate": "0.00005000",
+      "global_long_account_share": "0.5795",
+      "oi_change_15m_pct": "-0.0066654289232319658504700000",
+      "oi_change_60m_pct": "-0.2073593090058372747771466000",
+      "price_oi_quadrant": "IMMATERIAL",
+      "resistance": "287.36",
+      "return_15m_pct": "0.298580862723057468034284100",
+      "spread_bps": "3.571476091068438585667456360",
+      "support": "280.54",
+      "taker_buy_share": "0.5118479955570667888311216496",
+      "taker_ratio": "1.048542238684802383817024398",
+      "top_long_account_share": "0.6563",
+      "top_long_position_share": "0.7799",
+      "volume_percentile": "0.59375"
+    },
+    "gates": [
+      {
+        "category": "DATA_STALE",
+        "evidence": {
+          "critical_missing": []
+        },
+        "rule_id": "T0_REQUIRED_INPUTS",
+        "status": "PASS"
+      },
+      {
+        "category": "DATA_STALE",
+        "evidence": {
+          "stale_or_invalid": {}
+        },
+        "rule_id": "T0_DATA_FRESHNESS",
+        "status": "PASS"
+      },
+      {
+        "category": "RISK_BLOCKED",
+        "evidence": {
+          "maximum_bps": 15.0,
+          "spread_bps": "3.571476091068438585667456360"
+        },
+        "rule_id": "T0_SPREAD_BUDGET",
+        "status": "PASS"
+      },
+      {
+        "category": "RISK_BLOCKED",
+        "evidence": {
+          "divergence_bps": "0.7979600222028876353294699936",
+          "executable_quote": "USD",
+          "maximum_bps": 35.0,
+          "parity_assumed": false,
+          "research_quote": "USDT"
+        },
+        "rule_id": "T0_VENUE_CONFIRMATION",
+        "status": "PASS"
+      },
+      {
+        "category": "RISK_BLOCKED",
+        "evidence": {
+          "mode": "observation_only",
+          "orders_available": false
+        },
+        "rule_id": "T0_OBSERVATION_ONLY",
+        "status": "PASS"
+      }
+    ],
+    "missing_required_row_blocks": {
+      "open_interest_5m": true,
+      "taker_flow_5m": true
+    },
+    "newest_event_ages_ms": {
+      "binance_oi_history": 286812,
+      "binance_taker": 586812
+    },
+    "observer_signal": "NO_TRADE",
+    "replay_error": "snapshot 0: provenance.kraken_ticker: future event",
+    "replay_features_match": false,
+    "required_oi_boundaries_ms": [
+      1791657000000,
+      1791659700000,
+      1791660600000
+    ],
+    "required_taker_opens_ms": [
+      1791659700000,
+      1791660000000,
+      1791660300000
+    ],
+    "signal": "NO_TRADE",
+    "taker_kline_checks": [
+      {
+        "buy_matches": true,
+        "buy_volume_difference": "0.0000",
+        "open_time_ms": 1791659700000,
+        "total_matches": true,
+        "total_volume_difference": "0.0000"
+      },
+      {
+        "buy_matches": true,
+        "buy_volume_difference": "0.0000",
+        "open_time_ms": 1791660000000,
+        "total_matches": false,
+        "total_volume_difference": "-0.0760"
+      },
+      {
+        "buy_matches": true,
+        "buy_volume_difference": "0.0000",
+        "open_time_ms": 1791660300000,
+        "total_matches": true,
+        "total_volume_difference": "0.0000"
+      }
+    ],
+    "taker_open_semantics_verified": false
+  }
+}

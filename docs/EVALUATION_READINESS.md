@@ -1,5 +1,12 @@
 # Evaluation readiness: can TDAL's assessments be tested yet? (2026-10-11)
 
+Update after the issue #7 fix: the live observer now aligns derivatives to the
+completed candle and has emitted NO_TRADE with passing gates against live data.
+The dataset assessment below describes the pre-fix recordings. Prospective
+capture is still needed, and an independent replay-envelope timestamp limitation
+was observed; see [verification and limits](DERIVATIVE_CANDLE_ALIGNMENT.md).
+
+
 Priority 3 is establishing whether TDAL's trade assessments carry useful
 predictive information. The harness can now label selections against baselines
 (0.1) and the reward reference against invalidation (0.2). This note records
