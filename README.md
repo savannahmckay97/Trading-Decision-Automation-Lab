@@ -188,18 +188,19 @@ python -m market_observer.evaluation \
   --output results/tao_decision_evaluation.json
 ```
 
-Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Provider timing semantics, synchronized derivative windows and real user benefit still require validation.
+Each valid completed candle is counted once. Missing/censored labels remain unavailable. Results include selection coverage, descriptive forward movement, abstention opportunity costs and separate close-breach/wick-touch counts. These are **market comparisons, not executable returns or proof of better decisions**. A declared holdout is not automatically verified as untouched. Derivative windows now use exact completed-candle boundaries; broader provider timing semantics and real user benefit still require validation.
 
 See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigation and direction](docs/PRODUCT_DIRECTION.md).
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 99 tests covering live/replay guards,
+The integrated deterministic suite includes 105 tests covering live/replay guards,
 persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
 manifest compatibility, outcome/paper workflows and descriptive evaluation.
 GitHub Actions runs the suite plus specification validation on Python 3.10 and
 3.12. The ingestion implementation's Binance request returned HTTP 451;
-successful live provider integration remains unverified. No credential is used
+issue #7 now has a successful read-only live provider check and exact derivative
+candle alignment (see [contract and live evidence](docs/DERIVATIVE_CANDLE_ALIGNMENT.md)). No credential is used
 and no order route exists.
 
-Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.
+Next expand provider timing/identity validation and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.

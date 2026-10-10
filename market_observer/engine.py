@@ -49,8 +49,8 @@ def assess_gates(snapshot: dict[str, Any], features: dict[str, Any], config: Obs
     freshness_limits = {
         "binance_time": 5_000,
         "binance_price": 15_000,
-        "binance_oi_history": 360_000,
-        "binance_taker": 360_000,
+        "binance_oi_history": 15_000,
+        "binance_taker": 15_000,
         "kraken_ticker": 15_000,
     }
     stale: dict[str, Any] = {}
@@ -59,7 +59,10 @@ def assess_gates(snapshot: dict[str, Any], features: dict[str, Any], config: Obs
         if not item:
             stale[name] = "missing"
             continue
-        basis = item["received_time_ms"] if name == "kraken_ticker" else item.get("event_time_ms")
+        # Derivative event clocks identify candle buckets/points, not freshness.
+        # Features require exact completed-candle coverage; receipts must also
+        # be fresh so a cached snapshot cannot pass on alignment alone.
+        basis = item["received_time_ms"] if name in {"kraken_ticker", "binance_oi_history", "binance_taker"} else item.get("event_time_ms")
         if basis is None:
             stale[name] = "missing_event_time"
             continue
