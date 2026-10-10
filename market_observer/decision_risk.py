@@ -12,10 +12,11 @@ from decimal import Decimal
 from typing import Any
 
 from .config import ObserverConfig
+from .reward_reference import assess_reward_reference
 from .util import decimal
 
 
-RISK_CONTRACT_VERSION = "decision_risk/0.2"
+RISK_CONTRACT_VERSION = "decision_risk/0.3"
 TEN_THOUSAND = Decimal("10000")
 ACTIVE_SETUP_STATES = {"BREAKOUT_OBSERVED", "RETEST_PENDING", "LONG_ELIGIBLE"}
 BLOCKED_SIGNALS = {"DATA_STALE", "RISK_BLOCKED"}
@@ -26,7 +27,7 @@ NOT_INCLUDED = [
     "funding and borrow",
     "gap or slippage through invalidation",
     "executable-venue (Kraken) stop price translation",
-    "profit target or reward estimate",
+    "probability of reaching the reward reference",
 ]
 
 
@@ -35,6 +36,7 @@ def assess_decision_risk(
     setup: dict[str, Any],
     features: dict[str, Any] | None,
     config: ObserverConfig,
+    snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the risk contract for one evaluated decision.
 
@@ -132,7 +134,20 @@ def assess_decision_risk(
             "bars_since_breakout": bars_since,
             "last_evaluable_close_time_ms": last_evaluable_close_ms,
         },
-        "reward_reference": "NOT_DEFINED_BY_STRATEGY",
+        "reward_reference": (
+            assess_reward_reference(
+                snapshot,
+                reference=reference,
+                reference_close_time_ms=close_time_ms,
+                stop_distance=distance,
+                atr=atr,
+                breakout_close_time_ms=breakout_close_ms,
+                modelled_round_trip_bps=modelled,
+                config=config,
+            )
+            if snapshot is not None
+            else {"status": "TARGET_UNAVAILABLE", "reason": "SNAPSHOT_NOT_PROVIDED"}
+        ),
     }
 
 

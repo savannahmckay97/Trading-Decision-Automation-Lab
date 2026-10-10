@@ -73,6 +73,6 @@ def evaluate_snapshot(
         signal=signal,
         state_updated=state_updated,
         completed_candle_close_time_ms=close_time,
-        risk=assess_decision_risk(signal, state, resolved_features, config),
+        risk=assess_decision_risk(signal, state, resolved_features, config, snapshot),
     )
 

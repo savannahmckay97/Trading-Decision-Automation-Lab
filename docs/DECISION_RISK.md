@@ -1,4 +1,4 @@
-# Decision risk contract (`decision_risk/0.2`)
+# Decision risk contract (`decision_risk/0.3`)
 
 Every live (`market_decision/0.3`) and replay (`replay_decision/0.2`) decision
 now carries a `risk` object, produced by `market_observer/decision_risk.py`
@@ -60,7 +60,9 @@ otherwise be derived from inputs that failed a gate.
 - `venue`: prices are Binance USD-M research prices. No USD/USDT parity is
   assumed and no Kraken stop price is derived; that translation stays manual.
 - `sizing: NOT_COMPUTED_ACCOUNT_STATE_UNKNOWN`, `execution_permission: NONE`,
-  `reward_reference: NOT_DEFINED_BY_STRATEGY`.
+  `reward_reference`: nearest confirmed overhead swing high and a gross
+  opportunity-to-risk ratio, or `TARGET_UNAVAILABLE`; descriptive only. See
+  `docs/REWARD_REFERENCE.md`.
 
 ## Not established
 
@@ -84,7 +86,8 @@ trade proposals.
    - invalidation and stop distance — present (`invalidation`, `per_unit_risk`);
    - estimated costs — spread observed; fee and slippage configurable and
      reported `NOT_SUPPLIED` when unset (never zero); funding not modelled;
-   - available reward — absent (`NOT_DEFINED_BY_STRATEGY`). A target definition
+   - available reward — implemented as a descriptive reference
+     (`docs/REWARD_REFERENCE.md`); originally: a target definition
      must be chosen and frozen *before* examining outcomes, then reward and
      reward/risk follow mechanically.
 3. **Establish predictive usefulness** of those assessments with the PR #2

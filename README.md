@@ -162,7 +162,7 @@ The execution contract is deliberately conservative about what is known. Histori
 
 ## Decision risk contract
 
-Each decision includes a `risk` object stating the active setup's completed-close invalidation level, the per-unit distance to it at the research venue, and each cost component separately: observed Kraken spread, optional `--fee-bps-per-side` / `--slippage-bps-per-side` assumptions (reported as not supplied, never zero, when omitted) and unmodelled funding. It computes no quantity and grants no permission; blocked or setup-less cycles withhold figures. See `docs/DECISION_RISK.md`.
+Each decision includes a `risk` object stating the active setup's completed-close invalidation level, the per-unit distance to it at the research venue, and each cost component separately: observed Kraken spread, optional `--fee-bps-per-side` / `--slippage-bps-per-side` assumptions (reported as not supplied, never zero, when omitted) and unmodelled funding. It also reports a descriptive reward reference, the nearest confirmed overhead swing high, with a gross opportunity-to-risk ratio, or `TARGET_UNAVAILABLE` (see `docs/REWARD_REFERENCE.md`); it is not a take-profit and never affects eligibility. It computes no quantity and grants no permission; blocked or setup-less cycles withhold figures. See `docs/DECISION_RISK.md`.
 
 ## Meaning of signals
 
@@ -198,7 +198,7 @@ See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigatio
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 116 tests covering live/replay guards, the
+The integrated deterministic suite includes 136 tests covering live/replay guards, the
 per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
 manifest compatibility, outcome/paper workflows and descriptive evaluation.
 GitHub Actions runs the suite plus specification validation on Python 3.10 and

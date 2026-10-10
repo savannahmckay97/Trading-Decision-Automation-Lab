@@ -159,7 +159,9 @@ class DecisionRiskTests(unittest.TestCase):
     def test_persisted_string_values_give_identical_contract(self):
         evaluation = evaluate_snapshot(snapshot("breakout"), self.config, None)
         restored_state = json.loads(canonical_json(evaluation.state))
-        restored = assess_decision_risk(evaluation.signal, restored_state, evaluation.features, self.config)
+        restored = assess_decision_risk(
+            evaluation.signal, restored_state, evaluation.features, self.config, snapshot("breakout")
+        )
         self.assertEqual(canonical_json(restored), canonical_json(evaluation.risk))
 
     def test_contract_never_sizes_or_permits_execution(self):
@@ -168,7 +170,7 @@ class DecisionRiskTests(unittest.TestCase):
         self.assertFalse({key for key in keys if "quantity" in key or "notional" in key})
         self.assertEqual(evaluation.risk["sizing"], "NOT_COMPUTED_ACCOUNT_STATE_UNKNOWN")
         self.assertEqual(evaluation.risk["execution_permission"], "NONE")
-        self.assertEqual(evaluation.risk["reward_reference"], "NOT_DEFINED_BY_STRATEGY")
+        self.assertEqual(evaluation.risk["reward_reference"]["role"], "DESCRIPTIVE_OPPORTUNITY_NOT_TAKE_PROFIT")
 
     def test_live_and_replay_emit_identical_risk(self):
         snapshots = [snapshot("breakout"), snapshot("retest", received_offset=1)]
