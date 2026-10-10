@@ -1,3 +1,11 @@
+# Verification — issue #12, shared gap reset
+
+- 160 deterministic tests pass; specification validation passes.
+- Six new regression tests cover skipped failure candles, multiple gaps,
+  blocked recovery, restart/idempotence, independent new breakouts and invalid
+  persisted chronology. Live/replay setup and risk evidence agree across gaps.
+- Synthetic tests establish state handling, not live provider performance.
+
 # Verification — issue #7 derivative alignment, 10 October 2026
 
 - 154 deterministic tests pass after integrating current main (PR #6 and #8).

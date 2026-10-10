@@ -18,6 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from .asof import AsOfError, validate_snapshot_asof
 from .config import ObserverConfig
+from .continuity import sequence_status
 from .decision_risk import assess_decision_risk
 from .engine import default_setup_state
 from .evaluator import evaluate_snapshot
@@ -133,7 +134,6 @@ class ReplayRunner:
                     )
                 if sequence["status"] == "GAP":
                     gaps.append({"snapshot_index": index, **sequence})
-                    state = default_setup_state()
 
                 evaluation = evaluate_snapshot(snapshot, self.config, state, features=features)
                 state = evaluation.state
@@ -280,35 +280,6 @@ class ReplayRunner:
             "risk": assess_decision_risk("DATA_STALE", state, None, self.config),
         }
         return {"decision_id": stable_id("replay_decision", payload), **payload}
-
-
-def sequence_status(previous_close_ms: int | None, current_close_ms: int, interval_ms: int) -> dict[str, Any]:
-    """Classify chronological continuity between two completed candles."""
-
-    if previous_close_ms is None:
-        return {"status": "FIRST", "missing_bars": 0, "delta_ms": None}
-    delta = current_close_ms - previous_close_ms
-    if delta < 0:
-        return {"status": "OUT_OF_ORDER", "missing_bars": 0, "delta_ms": delta}
-    if delta == 0:
-        return {"status": "DUPLICATE", "missing_bars": 0, "delta_ms": 0}
-    if delta == interval_ms:
-        return {"status": "CONTIGUOUS", "missing_bars": 0, "delta_ms": delta}
-    if delta > interval_ms and delta % interval_ms == 0:
-        return {
-            "status": "GAP",
-            "missing_bars": delta // interval_ms - 1,
-            "delta_ms": delta,
-            "previous_close_time_ms": previous_close_ms,
-            "current_close_time_ms": current_close_ms,
-        }
-    return {
-        "status": "IRREGULAR",
-        "missing_bars": 0,
-        "delta_ms": delta,
-        "previous_close_time_ms": previous_close_ms,
-        "current_close_time_ms": current_close_ms,
-    }
 
 
 def write_replay(result: dict[str, Any], path: str | Path) -> None:

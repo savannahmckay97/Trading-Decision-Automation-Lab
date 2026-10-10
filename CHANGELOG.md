@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — issue #12, skipped-candle state reset
+
+- Reset stale hypotheses after unevaluated completed candles in the shared evaluator.
+- Report continuity/reset evidence and preserve state through blocked cycles.
+- Remove replay-only resets; add gap, restart and live/replay parity regressions.
+
+
 ## Unreleased — issue #7
 
 - Align taker buckets and OI changes to exact completed 15-minute candle boundaries.
