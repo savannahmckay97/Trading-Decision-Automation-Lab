@@ -18,6 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from .asof import AsOfError, validate_snapshot_asof
 from .config import ObserverConfig
+from .decision_risk import assess_decision_risk
 from .engine import default_setup_state
 from .evaluator import evaluate_snapshot
 from .features import FeatureError, calculate_features
@@ -145,6 +146,7 @@ class ReplayRunner:
                     state=state,
                     signal=evaluation.signal,
                     state_updated=evaluation.state_updated,
+                    risk=evaluation.risk,
                     sequence=sequence,
                 )
                 previous_close_time = close_time
@@ -217,10 +219,11 @@ class ReplayRunner:
         state: dict[str, Any],
         signal: str,
         state_updated: bool,
+        risk: dict[str, Any],
         sequence: dict[str, Any],
     ) -> dict[str, Any]:
         payload = {
-            "schema_version": "replay_decision/0.1",
+            "schema_version": "replay_decision/0.2",
             "replay_version": REPLAY_VERSION,
             "snapshot_index": index,
             "observed_at_ms": int(snapshot["observed_at_ms"]),
@@ -236,6 +239,7 @@ class ReplayRunner:
             "breakout_quality": quality,
             "features": features,
             "gates": gates,
+            "risk": risk,
         }
         return {"decision_id": stable_id("replay_decision", payload), **payload}
 
@@ -247,7 +251,7 @@ class ReplayRunner:
         exc: Exception,
     ) -> dict[str, Any]:
         payload = {
-            "schema_version": "replay_decision/0.1",
+            "schema_version": "replay_decision/0.2",
             "replay_version": REPLAY_VERSION,
             "snapshot_index": index,
             "observed_at_ms": snapshot.get("observed_at_ms"),
@@ -273,6 +277,7 @@ class ReplayRunner:
                     "evidence": {"error": f"{type(exc).__name__}: {exc}"},
                 }
             ],
+            "risk": assess_decision_risk("DATA_STALE", state, None, self.config),
         }
         return {"decision_id": stable_id("replay_decision", payload), **payload}
 
@@ -320,12 +325,25 @@ def parser() -> argparse.ArgumentParser:
     source.add_argument("--db", help="observer SQLite database input")
     result.add_argument("--base", default="TAO", help="base asset; TAO by default")
     result.add_argument("--output", required=True, help="immutable replay-result JSON path")
+    result.add_argument("--fee-bps-per-side", type=float, default=None,
+                        help="assumed exchange fee per side for the risk contract; unknown if omitted")
+    result.add_argument("--slippage-bps-per-side", type=float, default=None,
+                        help="assumed slippage per side for the risk contract; unknown if omitted")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    config = ObserverConfig(base_asset=args.base.upper(), mode="historical_replay")
+    config = ObserverConfig(
+        base_asset=args.base.upper(),
+        mode="historical_replay",
+        fee_bps_per_side=args.fee_bps_per_side,
+        slippage_bps_per_side=args.slippage_bps_per_side,
+    )
+    try:
+        config.validate()
+    except ValueError as exc:
+        parser().error(str(exc))
     snapshots = (
         load_jsonl_snapshots(args.jsonl)
         if args.jsonl

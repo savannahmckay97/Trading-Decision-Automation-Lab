@@ -118,6 +118,8 @@ python -m market_observer.replay \
   --output results/tao_replay.json
 ```
 
+Add `--fee-bps-per-side` and `--slippage-bps-per-side` to record cost assumptions in each decision's `risk` contract, as for the observer. Omitted costs are reported as not supplied, never zero, and the assumptions are part of the replay `configuration_id`.
+
 Replay input must already be chronological and must preserve the data actually available at each historical instant. The runner rejects reversed chronology, records duplicate and missing completed bars, resets an active setup across a detected gap, and refuses to overwrite a prior result file.
 
 JSONL and SQLite loaders restore declared decimal fields exactly. Dataset and
@@ -160,6 +162,10 @@ python -m market_observer.paper \
 
 The execution contract is deliberately conservative about what is known. Historical candles currently come from Binance USD-M research data, not a historical Kraken execution tape, so every fill records `executable_venue_validated: false`. Funding, order-book depth, latency, partial fills, queue position and liquidity impact remain unmodeled. The artifact reports per-unit hypothetical execution results only; it does not size positions, compound equity, authorize trades or make a strategy-performance claim.
 
+## Decision risk contract
+
+Each decision includes a `risk` object stating the active setup's completed-close invalidation level, the per-unit distance to it at the research venue, and each cost component separately: observed Kraken spread, optional `--fee-bps-per-side` / `--slippage-bps-per-side` assumptions (reported as not supplied, never zero, when omitted) and unmodelled funding. It also reports a descriptive reward reference, the nearest confirmed overhead swing high, with a gross opportunity-to-risk ratio, or `TARGET_UNAVAILABLE` (see `docs/REWARD_REFERENCE.md`); it is not a take-profit and never affects eligibility. It computes no quantity and grants no permission; blocked or setup-less cycles withhold figures. See `docs/DECISION_RISK.md`.
+
 ## Meaning of signals
 
 | Signal | Meaning |
@@ -194,12 +200,15 @@ See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigatio
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 99 tests covering live/replay guards,
-persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
+The integrated deterministic suite includes 136 tests covering live/replay guards, the
+per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion, immutable datasets, legacy
 manifest compatibility, outcome/paper workflows and descriptive evaluation.
 GitHub Actions runs the suite plus specification validation on Python 3.10 and
-3.12. The ingestion implementation's Binance request returned HTTP 451;
-successful live provider integration remains unverified. No credential is used
+3.12. The ingestion implementation's Binance request returned HTTP 451. A
+later live probe from another network reached both providers, but found the
+live observer can only emit `DATA_STALE` because the 5m taker/OI freshness
+limits cannot be met (issue #7); successful live decision output remains
+unverified. No credential is used
 and no order route exists.
 
 Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.

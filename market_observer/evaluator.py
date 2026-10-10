@@ -7,6 +7,7 @@ from typing import Any
 
 from .asof import validate_snapshot_asof
 from .config import ObserverConfig
+from .decision_risk import assess_decision_risk
 from .engine import (
     advance_breakout_retest,
     assess_gates,
@@ -26,6 +27,7 @@ class Evaluation:
     signal: str
     state_updated: bool
     completed_candle_close_time_ms: int
+    risk: dict[str, Any]
 
 
 def evaluate_snapshot(
@@ -71,5 +73,6 @@ def evaluate_snapshot(
         signal=signal,
         state_updated=state_updated,
         completed_candle_close_time_ms=close_time,
+        risk=assess_decision_risk(signal, state, resolved_features, config, snapshot),
     )
 

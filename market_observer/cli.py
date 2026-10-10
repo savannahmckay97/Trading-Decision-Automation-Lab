@@ -25,6 +25,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--pretty", action="store_true", help="indent JSON output")
     result.add_argument("--request-attempts", type=int, default=3)
     result.add_argument("--request-timeout", type=float, default=12.0)
+    result.add_argument("--fee-bps-per-side", type=float, default=None,
+                        help="assumed exchange fee per side for the risk contract; unknown if omitted")
+    result.add_argument("--slippage-bps-per-side", type=float, default=None,
+                        help="assumed slippage per side for the risk contract; unknown if omitted")
     return result
 
 
@@ -35,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
         poll_seconds=args.poll_seconds,
         request_attempts=args.request_attempts,
         request_timeout_seconds=args.request_timeout,
+        fee_bps_per_side=args.fee_bps_per_side,
+        slippage_bps_per_side=args.slippage_bps_per_side,
     )
     try:
         config.validate()

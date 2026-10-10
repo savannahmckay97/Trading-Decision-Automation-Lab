@@ -6,6 +6,7 @@ from typing import Any
 
 from .collectors import PublicCollectors
 from .config import ObserverConfig
+from .decision_risk import assess_decision_risk
 from .engine import STRATEGY_ID, default_setup_state
 from .evaluator import evaluate_snapshot
 from .features import FeatureError
@@ -58,6 +59,7 @@ class ObserverService:
                 features=evaluation.features,
                 quality=evaluation.quality,
                 gates=evaluation.gates,
+                risk=evaluation.risk,
                 errors=[error.record() for error in errors],
             )
             self.store.append_decision(decision)
@@ -82,10 +84,11 @@ class ObserverService:
         features: dict[str, Any],
         quality: dict[str, Any],
         gates: list[dict[str, Any]],
+        risk: dict[str, Any],
         errors: list[dict[str, Any]],
     ) -> dict[str, Any]:
         return {
-            "schema_version": "market_decision/0.2",
+            "schema_version": "market_decision/0.3",
             "observer_version": self.VERSION,
             "decision_time_ms": now_ms(),
             "mode": self.config.mode,
@@ -99,6 +102,7 @@ class ObserverService:
             "breakout_quality": quality,
             "features": features,
             "gates": gates,
+            "risk": risk,
             "snapshot_id": snapshot_id,
             "collection_errors": errors,
             "unknown_or_unimplemented": [
@@ -113,7 +117,7 @@ class ObserverService:
     def _failure_decision(self, errors: list, exc: Exception, snapshot_id: str | None) -> dict[str, Any]:
         setup = self.store.load_setup_state(STRATEGY_ID, self.config.research_symbol) or default_setup_state()
         return {
-            "schema_version": "market_decision/0.2",
+            "schema_version": "market_decision/0.3",
             "observer_version": self.VERSION,
             "decision_time_ms": now_ms(),
             "mode": self.config.mode,
@@ -134,6 +138,7 @@ class ObserverService:
                     "evidence": {"error": f"{type(exc).__name__}: {exc}"},
                 }
             ],
+            "risk": assess_decision_risk("DATA_STALE", setup, None, self.config),
             "snapshot_id": snapshot_id,
             "collection_errors": [error.record() for error in errors],
             "unknown_or_unimplemented": ["decision inputs unavailable"],
