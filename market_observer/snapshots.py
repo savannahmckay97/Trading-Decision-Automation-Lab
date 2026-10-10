@@ -173,8 +173,7 @@ def decode_snapshot(value: Any, *, require_complete: bool = False) -> dict[str, 
         if (endpoint != "binance_klines" and event["event_time_ms"] is not None
                 and event["event_time_ms"] > result["observed_at_ms"]):
             raise SnapshotError(f"provenance.{endpoint}: future event")
-        if (endpoint == "binance_time" and event["event_time_ms"] is not None
-                and event["event_time_ms"] != cutoff):
+        if endpoint == "binance_time" and event["event_time_ms"] != cutoff:
             raise SnapshotError("provenance.binance_time: event does not match exchange_time_ms")
     context = result.get("historical_context")
     if context is not None:

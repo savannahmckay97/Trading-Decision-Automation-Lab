@@ -138,6 +138,12 @@ class LiveCaptureReplayTests(unittest.TestCase):
                     decode_snapshot(changed, require_complete=True)
                 with self.assertRaisesRegex(AsOfError, "exchange_time_ms"):
                     validate_snapshot_asof(changed)
+        missing = deepcopy(row)
+        missing["provenance"]["binance_time"]["event_time_ms"] = None
+        with self.assertRaisesRegex(SnapshotError, "exchange_time_ms"):
+            decode_snapshot(missing, require_complete=True)
+        with self.assertRaises(AsOfError):
+            validate_snapshot_asof(missing)
 
     def test_event_dated_after_its_receipt_cannot_make_old_response_fresh(self):
         row = snapshot()

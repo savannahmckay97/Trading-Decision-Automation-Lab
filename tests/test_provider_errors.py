@@ -142,6 +142,27 @@ class HttpRetryTests(unittest.TestCase):
                 self.assertEqual(len(calls), 2)
                 sleep.assert_called_once_with(1)
 
+    def test_truncated_error_bodies_still_retry_or_start_cooldown(self):
+        class TruncatedBody(BytesIO):
+            def read(self, *args):
+                raise http.client.IncompleteRead(b"partial", 100)
+
+        def truncated(status):
+            return HTTPError(BASE, status, "provider error", {}, TruncatedBody())
+
+        with patch("market_observer.http.time.sleep") as sleep:
+            opener = Responses(truncated(503), b'{"price":"100"}')
+            self.assertEqual(JsonHttpClient(opener=opener).get(BASE, "/probe"), {"price": "100"})
+            self.assertEqual(len(opener.calls), 2)
+            sleep.assert_called_once_with(1)
+        opener = Responses(truncated(429), b'{"ok":true}')
+        client = JsonHttpClient(opener=opener)
+        with self.assertRaisesRegex(HttpError, "body unavailable.*cooldown 60s"):
+            client.get(BASE, "/first")
+        with self.assertRaisesRegex(HttpError, "cooldown"):
+            client.get(BASE, "/second")
+        self.assertEqual(len(opener.calls), 1)
+
     def test_rate_limits_declared_in_successful_bodies_start_host_cooldown(self):
         bodies = (
             b'{"error":["EAPI:Rate limit exceeded"]}',

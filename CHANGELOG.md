@@ -6,7 +6,7 @@
 - Start the host cooldown for rate limits declared in HTTP 200 bodies (Kraken, Binance -1003).
 - Require `binance_time`'s event time to equal `exchange_time_ms`, in both the live guard and the saved-snapshot decoder.
 - Measure event-clocked freshness from the earlier of event and receipt; skewed genuine data is still accepted.
-- Five regression tests (187 total).
+- Six regression tests (188 total).
 
 ## Unreleased — issue #12, skipped-candle state reset
 

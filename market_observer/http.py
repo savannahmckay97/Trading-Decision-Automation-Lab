@@ -105,7 +105,8 @@ class JsonHttpClient:
             body = data[:cls.ERROR_BODY_BYTES].decode("utf-8", errors="replace")
             if len(data) > cls.ERROR_BODY_BYTES:
                 body += " [truncated]"
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            # A truncated error body must not skip the 5xx retry or 429/418 cooldown.
             body = f"response body unavailable ({type(exc).__name__})"
         finally:
             error.close()
