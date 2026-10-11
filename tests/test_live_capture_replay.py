@@ -126,6 +126,52 @@ class LiveCaptureReplayTests(unittest.TestCase):
         with self.assertRaises(SnapshotError):
             decode_snapshot(row, require_complete=True)
 
+    def test_binance_time_event_must_equal_exchange_cutoff(self):
+        row = snapshot()
+        self.assertEqual(row["provenance"]["binance_time"]["event_time_ms"], row["exchange_time_ms"])
+        for shift in (-1, 1):
+            with self.subTest(shift=shift):
+                changed = deepcopy(row)
+                changed["provenance"]["binance_time"]["event_time_ms"] += shift
+                self.assertLessEqual(changed["provenance"]["binance_time"]["event_time_ms"], changed["observed_at_ms"])
+                with self.assertRaisesRegex(SnapshotError, "exchange_time_ms"):
+                    decode_snapshot(changed, require_complete=True)
+                with self.assertRaisesRegex(AsOfError, "exchange_time_ms"):
+                    validate_snapshot_asof(changed)
+        missing = deepcopy(row)
+        missing["provenance"]["binance_time"]["event_time_ms"] = None
+        with self.assertRaisesRegex(SnapshotError, "exchange_time_ms"):
+            decode_snapshot(missing, require_complete=True)
+        with self.assertRaises(AsOfError):
+            validate_snapshot_asof(missing)
+
+    def test_event_dated_after_its_receipt_cannot_make_old_response_fresh(self):
+        row = snapshot()
+        config = ObserverConfig()
+        self.assertEqual(self._stale(row, config), {})
+        # An old price response whose event clock was moved after its receipt,
+        # up to observation time. Both loaders accept it (parity with live),
+        # but freshness is measured from the earlier receipt.
+        stale = deepcopy(row)
+        stale["provenance"]["binance_price"]["received_time_ms"] = row["observed_at_ms"] - 60_000
+        stale["provenance"]["binance_price"]["event_time_ms"] = row["observed_at_ms"]
+        validate_snapshot_asof(stale)
+        decode_snapshot(stale, require_complete=True)
+        self.assertEqual(self._stale(stale, config)["binance_price"], {"age_ms": 60_000, "limit_ms": 15_000})
+        self.assertEqual(evaluate_snapshot(stale, config, None).signal, "DATA_STALE")
+        # Genuine local/provider skew (event a little after receipt) still passes.
+        skewed = deepcopy(row)
+        price = skewed["provenance"]["binance_price"]
+        price["event_time_ms"] = min(price["received_time_ms"] + 300, skewed["observed_at_ms"])
+        self.assertEqual(self._stale(skewed, config), {})
+
+    @staticmethod
+    def _stale(row, config):
+        from market_observer.engine import assess_gates
+        features = evaluate_snapshot(row, config, None).features
+        gate = next(g for g in assess_gates(row, features, config) if g["rule_id"] == "T0_DATA_FRESHNESS")
+        return gate["evidence"]["stale_or_invalid"]
+
     def test_persisted_future_events_fail_both_loaders(self):
         row = snapshot()
         row["provenance"]["kraken_ticker"]["event_time_ms"] = row["observed_at_ms"] + 1

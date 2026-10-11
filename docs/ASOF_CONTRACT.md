@@ -19,6 +19,12 @@ wraps failures as `EvaluationError` instead of producing a partial report.
 - Saved-snapshot decoding uses these same boundaries. Concurrent ticker updates
   and Kraken receipt-based events may follow the exchange clock sample while
   remaining available by observation time. See [saved replay verification](SAVED_SNAPSHOT_REPLAY.md).
+- `provenance.binance_time.event_time_ms` must equal `exchange_time_ms`: both are
+  the same `serverTime`, and the exchange time is the series/candle cutoff.
+- An envelope event may be later than its own receipt (provider/local clock
+  skew) and is not rejected for it. Event-clocked freshness (`binance_time`,
+  `binance_price`) is measured from the earlier of event and receipt, so a
+  response can never appear fresher than its receipt.
 - Required public endpoint provenance and non-empty OI/taker series are required.
 - Funding and positioning remain optional, but supplied rows need matching
   endpoint provenance and valid as-of timestamps.
