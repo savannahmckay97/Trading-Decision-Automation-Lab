@@ -4,6 +4,7 @@ import unittest
 from decimal import Decimal
 
 from market_observer.governor import (
+    GovernorError,
     GovernorConfig,
     PaperAccount,
     assess_trade,
@@ -48,7 +49,7 @@ def run(decisions, candles, *, hold=1, config=None):
         dataset_id="dataset_fixture",
         paper_config=PaperExecutionConfig(fee_bps_per_side=Decimal("5"),
                                           slippage_bps_per_side=Decimal("5"), max_hold_bars=hold),
-        config=config or GovernorConfig(),
+        config=config or GovernorConfig(execution_model="MARKET_BASELINE"),
     )
 
 
@@ -154,6 +155,74 @@ class GovernedPaperTests(unittest.TestCase):
         self.assertFalse(result["summary"]["performance_claim_available"])
         self.assertEqual(result["summary"]["execution_permission"], "NONE")
         self.assertTrue(all(row["execution_permission"] == "NONE" for row in result["journal"]))
+
+
+def maker(**kwargs):
+    return GovernorConfig(maker_fee_bps="2", **kwargs)
+
+
+def bar(i, o, h, l, c):
+    return candle(i * INTERVAL, o, h, l, c)
+
+
+class MakerStaggeredTests(unittest.TestCase):
+    # decision(): reference 100, emergency stop 96.5 (R = 3.5), trail 2 * ATR 2 = 4.
+    def test_requires_a_maker_fee_and_never_assumes_zero(self):
+        with self.assertRaises(GovernorError):
+            run([decision()], [flat(0), flat(1)], config=GovernorConfig())
+
+    def test_sizing_cost_is_maker_entry_plus_taker_exit(self):
+        result = run([decision()], [flat(0), bar(1, 100, 100.5, 99.5, 100), flat(2)], config=maker())
+        # 2 maker + 5 taker + 5 slippage + half of the 10 bps spread
+        self.assertEqual(result["journal"][0]["round_trip_cost_bps"], Decimal("17"))
+
+    def test_unfilled_entry_expires_without_touching_the_account(self):
+        up = lambda i: bar(i, 101, 103, 100.5, 102)
+        result = run([decision()], [flat(0), up(1), up(2), up(3)], hold=3, config=maker())
+        self.assertEqual(result["journal"][0]["paper_outcome"], "NOT_FILLED_TTL_EXPIRED")
+        self.assertEqual(result["trades"], [])
+        self.assertEqual(result["summary"]["ending_equity_usd"], Decimal("1000"))
+
+    def test_touch_is_not_a_fill(self):
+        touch = lambda i: bar(i, 101, 102, 100, 101)  # low equals the limit exactly
+        result = run([decision()], [flat(0), touch(1), touch(2), touch(3)], hold=3, config=maker())
+        self.assertEqual(result["journal"][0]["paper_outcome"], "NOT_FILLED_TTL_EXPIRED")
+
+    def test_staggered_targets_fill_as_maker_then_trail_stops_the_rest(self):
+        bars = [flat(0), bar(1, 100, 100.5, 99.5, 100), bar(2, 100, 104, 100, 103.5),
+                bar(3, 103.5, 108.5, 103.5, 108), bar(4, 108, 108, 102, 103), flat(5)]
+        trade = run([decision()], bars, hold=5, config=maker())["trades"][0]
+        self.assertEqual([(l["reason"], l["liquidity"]) for l in trade["legs"]],
+                         [("TAKE_PROFIT_1R", "MAKER"), ("TAKE_PROFIT_2R", "MAKER"), ("TRAILING_STOP", "TAKER")])
+        self.assertEqual(trade["legs"][0]["raw_price"], Decimal("103.5"))
+        self.assertEqual(trade["legs"][1]["raw_price"], Decimal("107"))
+        # trail = highest completed high 108.5 - 4 = 104.5; the bar opens above it, so fills at the level
+        self.assertEqual(trade["legs"][2]["raw_price"], Decimal("104.5"))
+        self.assertGreater(trade["realized_r"], 0)
+        self.assertEqual(trade["maker_leg_share"], Decimal(2) / 3)
+
+    def test_stop_beats_target_inside_one_bar(self):
+        bars = [flat(0), bar(1, 100, 100.5, 99.5, 100), bar(2, 100, 110, 96, 100), flat(3)]
+        trade = run([decision()], bars, hold=3, config=maker())["trades"][0]
+        self.assertEqual([l["reason"] for l in trade["legs"]], ["EMERGENCY_STOP"])
+        self.assertLess(trade["realized_r"], 0)
+
+    def test_targets_are_not_credited_on_the_entry_bar(self):
+        bars = [flat(0), bar(1, 100, 105, 99.5, 104), bar(2, 104, 104, 103, 103.5)]
+        trade = run([decision()], bars, hold=2, config=maker())["trades"][0]
+        self.assertTrue(all(not l["reason"].startswith("TAKE_PROFIT") for l in trade["legs"][:1]))
+
+    def test_trail_only_ratchets_up(self):
+        bars = [flat(0), bar(1, 100, 100.5, 99.5, 100), bar(2, 100, 107, 100, 106),
+                bar(3, 106, 106, 103.5, 104), bar(4, 104, 104, 100.5, 101)]
+        trade = run([decision()], bars, hold=4, config=maker())["trades"][0]
+        # after bar 2 the level is 107 - 4 = 103; bar 3 (high 106 < 107) cannot lower it
+        self.assertEqual(trade["legs"][-1]["reason"], "TRAILING_STOP")
+        self.assertEqual(trade["legs"][-1]["raw_price"], Decimal("103"))
+
+    def test_tranche_configuration_must_leave_a_trailing_remainder(self):
+        with self.assertRaises(ValueError):
+            maker(take_profit_tranches=((1, "0.6"), (2, "0.4")))
 
 
 if __name__ == "__main__":

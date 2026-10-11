@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — RiskGovernor profit exit
+
+- `MAKER_STAGGERED` execution (default): post-only entry, staggered maker take-profits at 1R/2R, taker trailing stop; `MARKET_BASELINE` retained. Maker fee must be supplied.
+- Nine new governor tests (210 total).
+
 ## Unreleased — issue #18, deferred review findings from the issue #12 PRs
 
 - Retry truncated HTTP bodies and bad status lines as transport failures.

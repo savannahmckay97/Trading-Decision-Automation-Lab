@@ -5,7 +5,7 @@ its assumptions (see research/setup_frequency/history.py). Governor parameters
 are the defaults fixed by the repository owner before this run; cost and hold
 assumptions are stated below and were not varied.
 
-Usage: python research/governed_backfill/run.py <backfill_dir>
+Usage: python research/governed_backfill/run.py <backfill_dir> [MAKER_STAGGERED|MARKET_BASELINE]
 """
 import sys
 from decimal import Decimal
@@ -19,9 +19,11 @@ from market_observer.paper import PaperExecutionConfig  # noqa: E402
 from market_observer.util import canonical_json  # noqa: E402
 
 FEE_BPS = Decimal("40")  # assumed Kraken spot taker fee at the lowest volume tier
+MAKER_FEE_BPS = Decimal("25")  # assumed Kraken spot maker fee at the same tier
 SLIPPAGE_BPS = Decimal("5")
 MAX_HOLD_BARS = 16  # the preregistered first-touch primary horizon (4 h)
 
+MODEL = sys.argv[2] if len(sys.argv) > 2 else "MAKER_STAGGERED"
 bars, _, _, _, decisions = replay(sys.argv[1])
 rows = [{"decision_id": f"bar{d['bar_index']}", "signal": "LONG_ELIGIBLE",
          "completed_candle_close_time_ms": d["close_time_ms"],
@@ -34,7 +36,7 @@ result = build_governed_paper_artifact(
     dataset_id="backfill_30d_exploratory",
     paper_config=PaperExecutionConfig(fee_bps_per_side=FEE_BPS, slippage_bps_per_side=SLIPPAGE_BPS,
                                       max_hold_bars=MAX_HOLD_BARS),
-    config=GovernorConfig(),
+    config=GovernorConfig(execution_model=MODEL, maker_fee_bps=MAKER_FEE_BPS),
 )
 approved = [row for row in result["journal"] if row["status"] == "APPROVED_FOR_PAPER"]
 cost_share = [row["quantity"] * row["sizing_reference_price"] * row["round_trip_cost_bps"] / 10000

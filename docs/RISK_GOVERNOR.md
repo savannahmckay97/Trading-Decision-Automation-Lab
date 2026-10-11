@@ -61,8 +61,38 @@ Size is computed on the emergency-stop distance, so a stop-out costs about
 1R. A close-rule exit usually costs less. A gap through the emergency stop costs
 more: loss is not bounded (`gap_loss_bounded: false`).
 
-There is **no take-profit**. Winners exit only at the max-hold close. Choosing a
-profit exit is an open owner decision; the reward reference stays descriptive.
+## Profit exit and maker-first execution (owner decision 2026-10-11)
+
+`execution_model=MAKER_STAGGERED` (the default; `MARKET_BASELINE` keeps the
+original next-open market entry with no target, for comparison). The shape was
+chosen by the owner: entries and profit exits as maker limit orders, stops as
+taker. The numbers below are my a priori defaults, not fitted to outcomes, and
+are the owner's to change before any prospective evidence exists.
+
+- **Entry:** a post-only buy limit at `min(signal close, next bar open)`,
+  resting up to `entry_ttl_bars` (2). It fills only if price trades *strictly
+  below* the limit; touching is not a fill. If a bar closes below invalidation
+  first, or the TTL lapses, the order is cancelled and the account is untouched
+  (`NOT_FILLED_*`). Fill rate is therefore an output, and unfilled winners are
+  a real cost of maker entries.
+- **Take-profits:** staggered sell limits (maker) at +1R (30%) and +2R (30%),
+  where R = limit price − emergency stop. They fill when price trades strictly
+  above the level, at the level, and are not credited on the entry bar.
+- **Trailing stop:** the remainder (40%) trails. The stop level is
+  `max(emergency stop, highest completed high before this bar − 2 × breakout ATR)`;
+  it only ratchets up and applies to the whole open quantity from the entry bar,
+  so it starts as the emergency stop. Taker, fills at the level or the bar open
+  if price gapped through.
+- **Other exits (taker):** close below invalidation, max-hold close.
+- **Within a bar a stop beats a target** (intrabar order is unknown).
+- **Costs:** maker legs pay only the maker fee (no spread, no slippage); taker
+  legs pay the taker fee, half the signal spread and slippage. Sizing assumes
+  the worst case, a stop-out: maker entry + taker exit + half spread + slippage.
+  `maker_fee_bps` has no default: unknown is never zero.
+
+Maker savings here are an upper bound: the tape has no queue position, partial
+fills or adverse selection (limits fill precisely when price is moving through
+them). Only prospective recording against real order-book data can price that.
 
 ## Governed paper replay
 
@@ -118,7 +148,25 @@ decision for a later version and must not be tuned on this sample.
 
 - Live or shadow integration. The observer does not call the governor and keeps
   no paper ledger. The live path also depended on issue #7.
-- Take-profit and trailing exits.
 - Event blackout (no event calendar input exists) and multi-asset correlation
   (one asset only).
 - Funding, depth, latency and partial fills.
+
+## Rebased plumbing check with maker-first execution (same 29-day sample)
+
+Same backfill, same assumptions, plus an assumed Kraken spot **maker fee of 25 bps**
+(taker 40). Run once with the defaults above; not tuned.
+
+| | MARKET_BASELINE | MAKER_STAGGERED |
+|---|---|---|
+| Approved / filled | 15 / 15 | 15 / 12 (3 entries never filled) |
+| Exits | 7 emergency, 4 invalidation, 4 hold | 3 emergency, 6 trailing, 2 invalidation, 1 hold |
+| Sum realised R | −8.63 | −6.21 |
+| Ending equity | $957.64 | $969.37 |
+| Mean cost share of risk budget | 50% | 43% |
+
+Maker-first helps but does not fix the cost problem at the lowest fee tier:
+25 bps maker is still 50 bps round trip before the exit. The structural lever is
+a lower fee tier, a venue with near-zero or rebated maker fees, or stops wide
+enough that costs are a small share of risk. n = 15 on reconstructed history:
+this is plumbing, not evidence about the strategy.
