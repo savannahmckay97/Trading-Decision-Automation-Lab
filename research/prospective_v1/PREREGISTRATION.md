@@ -24,8 +24,10 @@ ledger computes outcomes too.
 
 ## 2. Frozen inputs
 
-- **Data:** the prospective recording described in `~/tdal-recorder/data/MANIFEST.md`,
-  from segment 1 (start **2026-10-11T06:08:13Z**, the holdout start) up to the
+- **Data:** the prospective recording described in each segment's `MANIFEST.md`
+  (segment 1: `~/tdal-recorder/data/` on the laptop; segment 2:
+  `~/tdal-recorder/data/` on the cloud VM, backed up hourly to
+  `OneDrive/TDAL-recorder-backup/segment2/`), from segment 1 (start **2026-10-11T06:08:13Z**, the holdout start) up to the
   analysis cut-off in §5. Raw snapshots in `observer.sqlite` are the source. Gaps
   are never backfilled.
 - **Evaluator:** decisions are recomputed by replaying the recorded snapshots with
@@ -38,6 +40,21 @@ ledger computes outcomes too.
   rejects (for example extra fields) ends the pooled holdout at that segment's
   start. Strategy or parameter changes are never pooled. They start a new
   experiment with its own holdout start.
+- **Overlapping segments:** segment 2 (Oracle Cloud VM, Sydney, same code
+  76dbb5d) started **2026-10-12T18:01:52Z** while segment 1 (the laptop) kept
+  running, so some candles are recorded twice. The pooled series switches
+  source once, at a fixed cutover: **segment 1 for candles closing before
+  2026-10-13T00:00Z, segment 2 from then on.** Setup state carries across
+  candles (a breakout, then a retest within 6 bars), so each stretch is taken
+  whole from one recorder and the two are never mixed candle by candle. The
+  cutover leaves segment 2 about six hours (24 candles) to warm up from its
+  fresh start. After the cutover, segment 2's gaps are not filled from
+  segment 1. Segment 2 is preferred because it is the long-running host. The
+  rule is fixed before any outcome is examined and doesn't depend on what
+  either segment decided. For the overlapping candles, both segments'
+  decisions are compared as an operational parity check (state, signal, risk
+  reason, breakout-quality score, ignoring timing-dependent `DATA_STALE`
+  rows), and every difference is reported. **[OWNER]**
 - **Outcome prices:** Binance USD-M TAOUSDT completed 15m candles, taken from
   the recorded snapshots (each carries 150 candles, so gaps shorter than about
   37 h are filled by later snapshots that observed those candles). Execution
