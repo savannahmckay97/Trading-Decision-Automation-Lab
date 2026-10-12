@@ -46,6 +46,9 @@ def calculate_features(snapshot: dict[str, Any], config: ObserverConfig) -> dict
     market = snapshot["market"]
     spread = _spread_bps(market.get("kraken_bid_price"), market.get("kraken_ask_price"))
     divergence = _divergence_bps(market.get("binance_last_price"), market.get("kraken_last_price"))
+    # A long buys at the Kraken ask. Last trades can agree while the live quote does not,
+    # so the venue gate checks the ask; last-trade divergence stays as an annotation.
+    ask_divergence = _divergence_bps(market.get("binance_last_price"), market.get("kraken_ask_price"))
     features = {
         "completed_15m": True,
         "completed_candle_open_time_ms": current["open_time_ms"],
@@ -71,6 +74,7 @@ def calculate_features(snapshot: dict[str, Any], config: ObserverConfig) -> dict
         "top_long_position_share": _latest_share(snapshot["positioning"]["top_positions"]),
         "spread_bps": spread,
         "cross_venue_divergence_bps": divergence,
+        "executable_ask_divergence_bps": ask_divergence,
         "price_oi_quadrant": price_oi_quadrant(return_15m, oi_15, decimal(config.minimum_material_change_pct)),
     }
     return features

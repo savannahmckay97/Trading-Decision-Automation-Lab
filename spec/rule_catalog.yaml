@@ -98,9 +98,12 @@ rules:
     failure_modes: [clock_drift, delayed_feed, silent_disconnect]
 
   - rule_id: T0_VENUE_CONFIRMATION
-    version: 1
+    version: 2
     tier: 0
-    purpose: Confirm executable Kraken price before a Kraken-oriented decision.
+    purpose: >-
+      Confirm the executable Kraken price before a Kraken-oriented decision. Version 2
+      (issue #22, M2) gates on the Kraken ask a long would pay; last trades can agree
+      while the live quote does not, so last-trade divergence is kept as an annotation.
     horizon: instantaneous
     inputs:
       - market.binance.last_price
@@ -109,10 +112,11 @@ rules:
       - market.kraken.ask_price
       - config.max_cross_venue_divergence_bps
     calculation: >-
-      divergence_bps = 10000 * abs(kraken_last_price - binance_last_price)
-      / midpoint(kraken_last_price, binance_last_price)
+      executable_ask_divergence_bps = 10000 * abs(kraken_ask_price - binance_last_price)
+      / midpoint(kraken_ask_price, binance_last_price); last_trade_divergence_bps (annotation)
+      = 10000 * abs(kraken_last_price - binance_last_price) / midpoint(kraken_last_price, binance_last_price)
     condition: >-
-      kraken_last_price is null or divergence_bps > max_cross_venue_divergence_bps
+      kraken_ask_price is null or executable_ask_divergence_bps > max_cross_venue_divergence_bps
     action: RISK_BLOCKED
     severity: critical
     independence_group: venue_confirmation

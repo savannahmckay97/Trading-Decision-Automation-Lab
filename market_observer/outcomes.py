@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .dataset import DatasetError, validate_dataset_manifest
-from .replay import load_jsonl_snapshots
+from .replay import ReplayError, bind_replay_to_snapshots, load_jsonl_snapshots
 from .util import canonical_json, decimal, stable_id
 
 
@@ -308,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
         raise OutcomeLabelError(str(exc)) from exc
 
     replay_result = _read_json_object(args.replay, "replay result")
+    try:
+        bind_replay_to_snapshots(rows, replay_result)
+    except ReplayError as exc:
+        raise OutcomeLabelError(str(exc)) from exc
     try:
         horizons = tuple(int(item.strip()) for item in args.horizons_bars.split(",") if item.strip())
     except ValueError as exc:

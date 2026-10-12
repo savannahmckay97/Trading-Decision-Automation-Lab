@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .collectors import CollectionError, RawEvent
+from .collectors import CollectionError, RawEvent, payload_identity_error
 from .util import decimal, now_ms
 
 
@@ -16,7 +16,16 @@ def build_snapshot(
     *,
     completed_at_ms: int | None = None,
 ) -> dict[str, Any]:
+    # An event whose payload names another instrument is never used: it is dropped
+    # and treated as missing (so a critical one fails closed), with the reason kept.
+    identity_mismatches = {}
+    for name, event in events.items():
+        expected = executable_pair if name == "kraken_ticker" else research_symbol
+        reason = payload_identity_error(name, event.payload, expected)
+        if reason:
+            identity_mismatches[name] = reason
     receipts = [event.received_time_ms for event in events.values()]
+    events = {name: event for name, event in events.items() if name not in identity_mismatches}
     receipts.extend(error.received_time_ms for error in errors)
     if completed_at_ms is not None:
         if type(completed_at_ms) is not int or completed_at_ms < 0:
@@ -75,6 +84,9 @@ def build_snapshot(
         "quality": {
             "critical_missing": sorted(set(critical_missing)),
             "collection_errors": [error.record() for error in errors],
+            **({"identity_mismatches": [{"endpoint": name, "detail": detail}
+                                        for name, detail in sorted(identity_mismatches.items())]}
+               if identity_mismatches else {}),
         },
     }
     return snapshot

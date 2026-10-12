@@ -100,10 +100,15 @@ SCHEMA = {
     "provenance": dict.fromkeys(ENDPOINTS, PROVENANCE),
     "quality": {"critical_missing": [_text], "collection_errors": [{
         **dict.fromkeys(("source", "endpoint", "symbol", "detail"), _text),
-        "critical": _bool, "received_time_ms": timestamp}]},
+        "critical": _bool, "received_time_ms": timestamp}],
+        "identity_mismatches": [{"endpoint": _text, "detail": _text}]},
     "historical_context": {"kind": _text, "availability": _text,
                            "cutoff_ms": timestamp, "acquired_at_ms": timestamp},
 }
+
+
+# Fields present only when they have something to say (older snapshots lack them).
+OPTIONAL_FIELDS = {"snapshot.quality": {"identity_mismatches"}}
 
 
 def _decode(value: Any, schema: Any, path: str) -> Any:
@@ -116,7 +121,7 @@ def _decode(value: Any, schema: Any, path: str) -> Any:
         # The root permits candle-only legacy dataset objects. Endpoint entries
         # are optional; every supplied nested record must otherwise be complete.
         if path not in {"snapshot", "snapshot.provenance"}:
-            missing = schema.keys() - value.keys()
+            missing = schema.keys() - value.keys() - OPTIONAL_FIELDS.get(path, set())
             if missing:
                 raise SnapshotError(f"{path}: missing fields {sorted(missing)}")
         return {key: _decode(item, schema[key], f"{path}.{key}") for key, item in value.items()}
