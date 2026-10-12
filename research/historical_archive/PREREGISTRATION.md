@@ -1,8 +1,7 @@
 # Preregistration: historical replay of BREAKOUT_RETEST_V1 on TAO, 2024-04 to 2026-09
 
-**DRAFT for owner review.** Items marked **[OWNER]** carry a proposed default. This
-file is committed before any historical outcome is computed; the commit that removes
-"DRAFT" freezes the plan. Until then, no outcome may be examined.
+**FROZEN 2026-10-13.** The owner confirmed every **[OWNER]** default on 2026-10-13.
+This commit freezes the plan and is pushed before any historical outcome is computed.
 
 ## 1. Purpose and standing
 
@@ -60,7 +59,8 @@ be compared, with these choices:
 - **Stability:** the primary statistic separately for 2024-04-12..2025-06-30 and
   2025-07-01..2026-09-10, and by calendar quarter. Reported, not used for the
   reading; a result carried by one stretch is described as such.
-- **Paper ledger** (RiskGovernor, PR #11, if merged before the run): one $1,000
+- **Paper ledger** (RiskGovernor, PR #11, if merged before the run; it is an open
+  draft at freeze, so this run omits it; a later ledger run is reported as a separate analysis): one $1,000
   account, Kraken Tier 4 (taker 35, maker 20 bps), slippage 5 bps, the assumed
   3.35 bps spread; Tier 1 (80/40) sensitivity. **[OWNER]**
 
