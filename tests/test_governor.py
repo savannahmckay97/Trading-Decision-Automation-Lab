@@ -354,7 +354,10 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertEqual(seen["start_of_day_equity_usd"],
                          Decimal("1000") + sum(e["pnl_usd"] for e in before_midnight))
         self.assertEqual(seen["daily_realized_pnl_usd"], after_midnight[0]["pnl_usd"])
-        self.assertEqual(result["summary"]["ending_equity_usd"], Decimal("1000") + trade["net_pnl_usd"])
+        # The "later" trade fills and is then censored by missing bars: its known entry fee is booked too.
+        self.assertEqual(result["trades"][1]["status"], "CENSORED")
+        booked = sum(e["pnl_usd"] for t in result["trades"] for e in t["events"])
+        self.assertEqual(result["summary"]["ending_equity_usd"], Decimal("1000") + booked)
 
 if __name__ == "__main__":
     unittest.main()

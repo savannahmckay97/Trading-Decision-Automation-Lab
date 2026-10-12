@@ -25,8 +25,11 @@ MAX_HOLD_BARS = 16  # the preregistered first-touch primary horizon (4 h)
 
 MODEL = sys.argv[2] if len(sys.argv) > 2 else "MAKER_STAGGERED"
 bars, _, _, _, decisions = replay(sys.argv[1])
+# observed_at_ms: the replay's assumed decision time (4 min after the close), so the
+# governor enters on the first candle opening after it, never on earlier prices.
 rows = [{"decision_id": f"bar{d['bar_index']}", "signal": "LONG_ELIGIBLE",
          "completed_candle_close_time_ms": d["close_time_ms"],
+         "observed_at_ms": d["close_time_ms"] + 1 + 240_000,
          "features": {"spread_bps": SPREAD * 10000}, "risk": d["risk"]} for d in decisions]
 last = bars[-1]["close_time_ms"] + 1
 tape_snapshot = {"observed_at_ms": last, "exchange_time_ms": last, "research_symbol": "TAOUSDT",

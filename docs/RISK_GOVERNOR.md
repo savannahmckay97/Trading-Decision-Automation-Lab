@@ -116,9 +116,21 @@ Decisions are processed in completed-close order on one account:
 - **Proposals:** `LONG_ELIGIBLE` decisions only, first observation per completed
   candle (repeated polls are counted as `duplicate_polls`, not traded). Other
   records, including `DATA_STALE` failures without a candle anchor, are counted;
-  observation order is checked by `observed_at_ms` and `snapshot_index`.
-- **Entry:** next bar open after `LONG_ELIGIBLE`. If that open is at or below
-  invalidation, the trade is not entered. The quantity committed at the fill is
+  observation order is checked by `observed_at_ms` and `snapshot_index`, and
+  proposal anchors that go backwards are rejected rather than sorted.
+- **One slot, reserved from submission:** an approved proposal holds the single
+  position slot from the moment it is approved: a resting order until it fills,
+  expires or is cancelled, a position until it exits. A later proposal therefore
+  sees only what was known at its own time, never how an earlier order resolves.
+- **Lineage:** the CLI rebuilds the replay from the verified dataset and rejects
+  any replay that doesn't match it (`bind_replay_to_snapshots`, PR #24). The
+  result ID covers the governor version and the content of the decisions consumed.
+- **Entry:** the open of the first candle opening at or after the decision's
+  observation time (`observed_at_ms`), so no price from before the decision
+  exists is used; a decision without one enters on the candle after its signal
+  candle. If a candle between the signal and the entry closes below invalidation,
+  or the entry open is at or below invalidation, the trade is not entered (both
+  execution models use these rules). The quantity committed at the fill is
   at most the reference-sized quantity, reduced if needed so notional plus entry
   fee fits the cash cap and the loss to the emergency stop plus costs, measured
   from the actual entry, fits the risk budget (`resize_reasons`).
@@ -132,8 +144,10 @@ Decisions are processed in completed-close order on one account:
   (`max_realized_drawdown_usd`) is on realised equity after each leg, not marked
   to market.
 - **Censoring:** bars are consumed one at a time until the order or position
-  ends. A missing bar while an order or position is open ends the simulation, and
-  later proposals are `NOT_EVALUATED`; bars missing after the exit don't matter.
+  ends. A missing bar while an order or position is open ends the simulation:
+  legs already known (entry fee, earlier take-profits) are booked, the open
+  remainder is left unvalued (`ending_equity_basis`), and later proposals are
+  `NOT_EVALUATED`. Bars missing after the exit don't matter.
 - **Malformed input blocks explicitly:** non-finite or non-positive ATR or prices,
   stop geometry other than `0 < emergency stop ≤ invalidation < reference`,
   negative or non-finite costs, a missing spread, and invalid account state.
@@ -178,24 +192,26 @@ Same backfill, same assumptions, plus an assumed Kraken spot **maker fee of 25 b
 
 | | MARKET_BASELINE | MAKER_STAGGERED |
 |---|---|---|
-Rerun 2026-10-13 after fixing the issue #22 findings G1–G7 and per-leg
-settlement, with the same assumptions. The first run's numbers came from the
-faulty model and are superseded: G1 had cancelled three maker entries that had
-in fact filled (two of them losers), and G2 had trailed stops from the entry
-bar's own high.
+Rerun 2026-10-13 after fixing the issue #22 findings, with the same cost
+assumptions. Earlier runs are superseded: the first came from a model with
+causality errors (G1 cancelled three filled maker entries, G2 trailed from the
+entry bar's own high), and the second still entered on the candle after the
+signal, 1–3 minutes before the decision existed. This run enters on the first
+candle opening after the assumed decision time (4 minutes after the close) and
+reserves the position slot from submission.
 
 | | MARKET_BASELINE | MAKER_STAGGERED |
 |---|---|---|
-| Approved / filled | 15 / 15 | 15 / 15 (first run: 12) |
-| Exits | 7 emergency, 4 invalidation, 4 hold | 5 emergency, 6 trailing, 3 invalidation, 1 hold |
-| Sum realised R | −8.33 (first run −8.63) | −7.75 (first run −6.21) |
-| Ending equity | $959.09 (first run $957.64) | $961.90 (first run $969.37) |
-| Max realised drawdown | $43.69 | $41.29 |
+| Approved / filled | 15 / 12 | 15 / 11 |
+| Exits | 5 emergency, 3 invalidation, 4 hold | 3 emergency, 5 trailing, 2 invalidation, 1 hold |
+| Sum realised R | −6.57 (earlier runs −8.63, −8.33) | −4.72 (earlier runs −6.21, −7.75) |
+| Ending equity | $967.61 | $976.62 |
+| Max realised drawdown | $33.15 | $26.23 |
 | Mean cost share of risk budget | 50% | 43% |
 
-Maker-first helps only marginally (about $3 here, not the $12 first reported)
-and does not fix the cost problem at the lowest fee tier: 25 bps maker is still
-50 bps round trip before the exit. The structural lever is
+Both still lose money on this sample. Maker-first is about $9 better here, on
+n = 11–12 trades, which is noise-level; and it does not fix the cost problem at
+the lowest fee tier: 25 bps maker is still 50 bps round trip before the exit. The structural lever is
 a lower fee tier, a venue with near-zero or rebated maker fees, or stops wide
 enough that costs are a small share of risk. n = 15 on reconstructed history:
 this is plumbing, not evidence about the strategy.
