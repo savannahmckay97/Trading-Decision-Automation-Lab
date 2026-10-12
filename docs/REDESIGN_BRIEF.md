@@ -84,9 +84,13 @@ The owner may add an earlier conversation that sets out the layers in more detai
   context, far too few to prove a cycle "works like clockwork". Weight it accordingly.
 - **Recurrence can be hindsight.** TAO was chosen for behaving in a recurring way; the
   current rule tried to exploit that and the archive didn't support it.
-- **Data already seen.** TAO 2024-04..2026-09 has been examined for v1. New designs made
-  knowing those results should be judged mainly on other assets, on a locked test period,
-  and prospectively.
+- **What has been seen, and what hasn't.** TAO 2024-04..2026-09 was scored for v1 only.
+  That tells us one rule fails; it says nothing about which other patterns work, so the
+  history stays usable for new rules provided nobody designs by studying TAO's past price
+  action and tuning to fit it. Don't delete the v1 results: they are the audit trail.
+- **Lock a test period.** Design and tune on TAO up to 2025-09-30. Keep 2025-10-01 to
+  2026-09-30 locked: no new idea is scored on it during design. A finished, written-down
+  rule gets one run on it, then prospective confirmation on the recorder.
 
 ## 6. Suggested sequence
 
@@ -95,8 +99,8 @@ The owner may add an earlier conversation that sets out the layers in more detai
    `research/historical_archive/fetch_archive.py` (PR #21) and check fidelity the same way.
 3. A layer framework: each layer is a pure function of an as-of snapshot returning
    evidence with provenance; the decision combines layers explicitly and records why.
-4. The hypothesis ledger and a walk-forward evaluator over the archive, with a test period
-   locked before any hypothesis is scored on it (proposal: the last 12 months).
+4. The hypothesis ledger and a walk-forward evaluator over the archive, with the test
+   period in §5 (2025-10-01..2026-09-30) locked before any hypothesis is scored on it.
 5. First hypotheses, written down before scoring. Then preregister the survivors and run
    them prospectively on the recorder.
 
