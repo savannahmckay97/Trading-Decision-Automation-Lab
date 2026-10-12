@@ -63,53 +63,75 @@ ledger computes outcomes too.
 
 ## 3. Population
 
-Every `LONG_ELIGIBLE` decision in the window, counting the first gate-passing
-observation per completed candle (the harness rule in `DECISION_EVALUATION.md`).
-Blocked cycles count towards coverage only. Decisions without a reward reference
-(`TARGET_UNAVAILABLE`) and censored paths are counted and reported, never scored.
+The **targeted population** is the first observation per completed candle whose
+signal is `LONG_ELIGIBLE` and whose `risk.reward_reference.status` is `AVAILABLE`
+(the harness's first-observation rule in `DECISION_EVALUATION.md`; repeated polls of
+one candle count once). Eligible decisions without an available reward reference are
+counted and reported separately (`TARGET_UNAVAILABLE`), scored only in secondary 2.
+Blocked cycles count towards coverage only.
 
 ## 4. Analyses
 
-### Primary
+Amended 2026-10-13 after the independent review in issue #22, before any
+prospective outcome was examined. The earlier primary (mean first-touch R over
+resolved cases, losses scored −1R, paths starting at the signal close) is kept only
+as a descriptive statistic below, because it conditions on resolution, flatters
+close-rule losses and lets prices before the decision decide the result.
 
-- **Outcome:** reward first touch under the **close rule**
-  (`COMPLETED_CLOSE_BELOW`) at a **16-bar (4 h) horizon**, using the harness's
-  `_first_touch` unchanged.
-- **Statistic:** **mean realised gross R per decided case**: `+rᵢ` for
-  `TARGET_FIRST`, `−1` for `STOP_FIRST`. The exploratory study found it the more
-  direct per-case number, because it doesn't assume the hit rate is independent
-  of the ratio. **[OWNER]**
-- **Uncertainty:** a 95% percentile bootstrap that resamples **UTC days** with
-  replacement (overlapping setups on one day aren't independent), 10,000 draws,
-  seed 20261012.
-- **Reading, fixed in advance:**
-  - lower bound > 0: the setup shows a gross edge; proceed to the net question
-    (ledger, below);
-  - upper bound < 0: evidence against the rule as specified; stop treating it as
-    a candidate and redesign on independent grounds;
-  - otherwise: inconclusive. The analysis is not rerun on the same data with
-    different settings.
+### Primary: observation-aligned gross trade outcome
 
-### Co-reported with the primary (not used for the reading)
+For each case in the targeted population, a hypothetical long trade, frozen as:
 
-- Target-first fraction of decided cases with its Wilson 95% interval, against
-  the breakeven rate at the mean ratio `1 / (1 + mean r)`.
-- Every status count: `TARGET_FIRST`, `STOP_FIRST`, `AMBIGUOUS_SAME_BAR`,
-  `NEITHER_WITHIN_HORIZON`, `TARGET_UNAVAILABLE`, censored.
+- **Entry:** the open of the first 15m candle that opens at or after the recorded
+  `decision_time_ms`. Decisions arrive 1–3 min after the signal close, so this is
+  normally the second candle after the signal candle; the first is already under way
+  when the decision exists. Price before that open is never used.
+- **Not entered:** if that entry open is already at or above the reward level, or at
+  or below invalidation, the trade isn't taken and scores **0R**. It stays in the
+  population.
+- **Exits**, checked bar by bar from the entry candle for **16 candles (4 h)**:
+  the reward level is touched (high ≥ level), exit at the level; otherwise a candle
+  closes below invalidation, exit at that close; if both happen in one candle, the
+  target counts first (the close rule acts only at the close). Otherwise exit at the
+  close of the 16th candle.
+- **R** = (exit − entry) / (entry − invalidation), gross of costs.
+- **Censored:** a missing candle before the exit. Counted and reported, not scored.
+
+**Statistic:** mean gross R over every scored case (pooled: total R / cases).
+
+**Uncertainty:** 95% percentile bootstrap resampling clusters with replacement,
+10,000 draws, seed 20261012. A cluster is the UTC day of the signal close, and only
+days with at least one scored case are clusters, so no draw is empty. Sensitivity:
+the same with 2-day and 7-day blocks, for dependence across midnight and adjacent days.
+
+**Reading, fixed in advance:**
+- fewer than 30 scored cases or fewer than 15 clusters: **INCONCLUSIVE_SPARSE**;
+- lower bound > 0: the signals produced positive gross trade-like outcomes before
+  costs; proceed to the net question (ledger). This is not a claim of selection value
+  (secondary 1) or of net profitability;
+- upper bound < 0: evidence against the rule as specified; redesign on independent grounds;
+- otherwise: inconclusive. The analysis is not rerun with different settings.
 
 ### Secondary (all reported; none used to choose anything)
 
-1. **Other horizons and rules:** 4 and 96 bars; wick rule at all three horizons.
-2. **Close-exit R:** the close rule exits at a close below invalidation, so
-   gross R of −1 is a best case. Report R using the actual breach close as the
-   exit.
-3. **Bar-1 sensitivity:** decisions arrive about 1–3 min after the close, but bar 1
-   of the path starts at the close. Report the primary statistic both with and
-   without the cases whose first event is on bar 1.
-4. **Selection baselines** (harness 0.1, 16 bars): TDAL vs `SELECT_ALL` and
-   `POSITIVE_PRIOR_RETURN`, mean and median forward close movement, worst
-   adverse excursion. Descriptive.
-5. **Governed paper ledger** (RiskGovernor, PR #11): one $1,000 paper account
+1. **Matched comparator, for selection value.** The same entry, exit and R
+   definitions applied to every other evaluated candle in the window, with the
+   reward level from the same reward-reference function at that candle and
+   invalidation at entry − D × ATR, where D is the median `distance_atr` of the
+   targeted population. Report TDAL minus comparator mean R with the same
+   bootstrap. Only a positive lower bound here would support a claim that TDAL
+   selects better trades than its own geometry applied indiscriminately.
+2. **TARGET_UNAVAILABLE cases:** the same trade with only the invalidation and
+   horizon exits.
+3. **Other horizons and stop rules:** 4 and 96 candles; a wick stop (exit at the
+   invalidation level when a low touches it, and stop-first when target and stop
+   share a candle).
+4. **Descriptive first-touch statistic** (the pre-amendment primary): mean R over
+   resolved cases with losses at −1R and paths from the signal close, with all status
+   counts. A mechanism description, not an edge measure.
+5. **Forward-move baselines** (harness 0.1, 16 bars): TDAL vs `SELECT_ALL` and
+   `POSITIVE_PRIOR_RETURN`. Descriptive.
+6. **Governed paper ledger** (RiskGovernor, PR #11): one $1,000 paper account
    run chronologically over the same decisions, with parameters as fixed there
    (0.5% risk; −2% daily or 3-loss breaker; one position; no leverage;
    close-below-invalidation and 0.5 ATR emergency stop). `MAKER_STAGGERED` is
@@ -124,20 +146,21 @@ Blocked cycles count towards coverage only. Decisions without a reward reference
    maker fill model is optimistic (no queue, partial fills or adverse
    selection), and fills are priced on Binance candles. So a positive ledger
    alone is not a success, and it can't rescue a primary that isn't positive.
-6. **Coverage:** recorder uptime, gap list, blocked-cycle share and the share of
+7. **Coverage:** recorder uptime, gap list, blocked-cycle share and the share of
    decisions that are `TARGET_UNAVAILABLE`.
 
 ## 5. When the analysis runs
 
 **One analysis, no interim outcome looks.** **[OWNER]** It runs at the earlier of:
 
-- **110 `LONG_ELIGIBLE` decisions that have a reward reference at observation**
-  (expected about 90 decided cases, roughly ±10 points on the target-first rate;
-  `EVALUATION_READINESS.md` §3 estimates about 11–12 months); or
+- **110 cases in the targeted population** (§3: first observation per candle,
+  `LONG_ELIGIBLE`, `reward_reference.status == AVAILABLE`; `EVALUATION_READINESS.md`
+  §3 estimates about 11–12 months); or
 - **2027-10-11T00:00Z**, one year after the holdout start.
 
-The count uses decision fields only (setup state and the presence of
-`risk.reward_reference`), never prices after the decision. So a script may
+The count uses decision fields only (signal, completed candle and
+`risk.reward_reference.status`), never prices after the decision. If the deadline
+arrives first with too few cases, the reading is INCONCLUSIVE_SPARSE (§4). So a script may
 track it while recording continues. Operational monitoring (uptime, gates,
 errors) is always allowed.
 
@@ -149,11 +172,15 @@ outputs suppressed:
 
 - an export from `observer.sqlite` to canonical snapshot JSONL plus a dataset
   manifest (`dataset.py`; none exists today);
-- a parity check of replay vs recorded decisions;
-- the analysis script for §4 (the bootstrap, close-exit R and bar-1 sensitivity
-  are new code);
-- the ledger at the PR #11 commit used. If PR #11 changes before the look, this
-  file is amended first, and the amendment says so.
+- a parity check of replay vs recorded decisions on canonical fields: completed
+  candle, setup state and transition, signal, risk status and reason, invalidation
+  and reward levels, gate statuses. Decision IDs, mode and permission metadata and
+  observation timestamps legitimately differ between live and replay and are excluded;
+- the analysis script for §4, including the matched comparator and the sparse and
+  bootstrap edge cases, tested on synthetic fixtures;
+- the ledger at a pinned PR #11 commit with the issue #22 findings G1–G7 fixed. The
+  ledger results published in PR #11 so far come from the unrepaired model and are
+  not used. This file is amended to name the pinned commit before the look.
 
 ## 7. Commitments
 
