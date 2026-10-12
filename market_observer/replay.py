@@ -27,15 +27,19 @@ from .snapshots import SnapshotError, decode_snapshot, load_snapshot_json
 from .util import canonical_json, stable_id
 
 
-REPLAY_VERSION = "trading-decision-lab-replay-0.3.0"
+REPLAY_VERSION = "trading-decision-lab-replay-0.4.0"
 
 
 class ReplayError(ValueError):
     """Raised when replay input would make chronological results unreliable."""
 
 
-def load_jsonl_snapshots(path: str | Path) -> Iterator[dict[str, Any]]:
-    """Yield normalized snapshots from a UTF-8 JSON Lines file."""
+def load_jsonl_snapshots(path: str | Path, *, strict: bool = True) -> Iterator[dict[str, Any]]:
+    """Yield normalized snapshots from a UTF-8 JSON Lines file.
+
+    ``strict=False`` yields a snapshot that fails the structural contract as raw JSON,
+    for a replay that fails closed on it (``invalid_snapshots="fail_closed"``).
+    """
 
     with Path(path).open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -43,15 +47,21 @@ def load_jsonl_snapshots(path: str | Path) -> Iterator[dict[str, Any]]:
                 continue
             try:
                 value = load_snapshot_json(line)
-            except (json.JSONDecodeError, SnapshotError) as exc:
+            except SnapshotError as exc:
+                if strict:
+                    raise ReplayError(f"invalid JSON on line {line_number}: {exc}") from exc
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
                 raise ReplayError(f"invalid JSON on line {line_number}: {exc}") from exc
             if not isinstance(value, dict):
                 raise ReplayError(f"line {line_number}: snapshot must be an object")
             yield value
 
 
-def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) -> Iterator[dict[str, Any]]:
-    """Yield saved normalized snapshots in their recorded order."""
+def load_sqlite_snapshots(
+    path: str | Path, research_symbol: str | None = None, *, strict: bool = True
+) -> Iterator[dict[str, Any]]:
+    """Yield saved normalized snapshots in their recorded order (``strict`` as for JSONL)."""
 
     uri = f"file:{Path(path).expanduser().resolve()}?mode=ro"
     try:
@@ -73,7 +83,11 @@ def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) 
         for (payload_json,) in db.execute(query, params):
             try:
                 value = load_snapshot_json(payload_json)
-            except (json.JSONDecodeError, SnapshotError) as exc:
+            except SnapshotError as exc:
+                if strict:
+                    raise ReplayError(f"invalid stored snapshot: {exc}") from exc
+                value = json.loads(payload_json)
+            except json.JSONDecodeError as exc:
                 raise ReplayError(f"invalid stored snapshot: {exc}") from exc
             if not isinstance(value, dict):
                 raise ReplayError("stored normalized snapshot is not an object")
@@ -82,12 +96,65 @@ def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) 
         db.close()
 
 
+class _InvalidSnapshot(ValueError):
+    """A snapshot that breaks the structural contract, under the fail_closed policy."""
+
+
+def _failure_status(exc: Exception) -> str:
+    if isinstance(exc, AsOfError):
+        return "ASOF_INVALID"
+    if isinstance(exc, _InvalidSnapshot):
+        return "SNAPSHOT_INVALID"
+    return "FEATURE_INVALID"
+
+
+def bind_replay_to_snapshots(snapshots: list[dict[str, Any]], replay_result: dict[str, Any]) -> None:
+    """Raise ReplayError unless ``replay_result`` is exactly the replay of these snapshots.
+
+    Rebuilds the replay from the (already verified) snapshots with the configuration the
+    replay records, and requires the same configuration, replay ID and decision content.
+    A replay of another dataset, symbol or configuration, or with edited decisions, fails.
+    """
+    baseline = replay_result.get("baseline")
+    if not isinstance(baseline, dict) or not isinstance(baseline.get("configuration"), dict):
+        raise ReplayError("replay result has no recorded configuration")
+    if baseline.get("replay_version") != REPLAY_VERSION:
+        raise ReplayError(f"replay was produced by {baseline.get('replay_version')}; this code is "
+                          f"{REPLAY_VERSION}. Rebuild the replay, or bind it using the code that made it")
+    recorded = dict(baseline["configuration"])
+    recorded.pop("research_symbol", None)
+    recorded.pop("executable_pair", None)
+    try:
+        config = ObserverConfig(**recorded)
+        config.validate()
+    except (TypeError, ValueError) as exc:
+        raise ReplayError(f"replay configuration is invalid: {exc}") from exc
+    if stable_id("config", config.public_dict()) != baseline.get("configuration_id"):
+        raise ReplayError("replay configuration does not match its configuration_id")
+    try:
+        runner = ReplayRunner(config, invalid_snapshots=baseline.get("invalid_snapshot_policy", "abort"))
+    except ValueError as exc:
+        raise ReplayError(str(exc)) from exc
+    rebuilt = runner.run(snapshots)
+    if rebuilt["replay_id"] != replay_result.get("replay_id"):
+        raise ReplayError("replay does not match the verified dataset")
+    if json.loads(canonical_json(rebuilt["decisions"])) != json.loads(canonical_json(replay_result.get("decisions"))):
+        raise ReplayError("replay decisions differ from a replay of the verified dataset")
+
+
 class ReplayRunner:
     """Replay snapshots without collectors, credentials, orders, or shared state."""
 
-    def __init__(self, config: ObserverConfig) -> None:
+    def __init__(self, config: ObserverConfig, *, invalid_snapshots: str = "abort") -> None:
+        """``invalid_snapshots``: "abort" (default) stops on a snapshot that breaks the
+        structural contract, treating it as a corrupted dataset. "fail_closed" records a
+        DATA_STALE decision for it and continues, as the live service does, so a recorded
+        segment with one malformed response stays replayable."""
+        if invalid_snapshots not in {"abort", "fail_closed"}:
+            raise ValueError("invalid_snapshots must be 'abort' or 'fail_closed'")
         self.config = replace(config, mode="historical_replay")
         self.config.validate()
+        self.invalid_snapshots = invalid_snapshots
 
     def run(self, snapshots: Iterable[dict[str, Any]]) -> dict[str, Any]:
         state = default_setup_state()
@@ -117,7 +184,9 @@ class ReplayRunner:
                 try:
                     snapshot = decode_snapshot(snapshot, require_complete=True)
                 except SnapshotError as exc:
-                    raise ReplayError(f"snapshot {index}: {exc}") from exc
+                    if self.invalid_snapshots == "abort":
+                        raise ReplayError(f"snapshot {index}: {exc}") from exc
+                    raise _InvalidSnapshot(str(exc)) from exc
                 features = calculate_features(snapshot, self.config)
                 close_time = int(features["completed_candle_close_time_ms"])
                 sequence = sequence_status(previous_close_time, close_time, self.config.interval_ms)
@@ -150,9 +219,16 @@ class ReplayRunner:
                     sequence=sequence,
                 )
                 previous_close_time = close_time
-            except (FeatureError, AsOfError) as exc:
-                sequence_counts["ASOF_INVALID" if isinstance(exc, AsOfError) else "FEATURE_INVALID"] += 1
+            except (FeatureError, AsOfError, _InvalidSnapshot) as exc:
+                sequence_counts[_failure_status(exc)] += 1
                 decision = self._failure(index, snapshot, state, exc)
+            except (KeyError, TypeError, ValueError) as exc:
+                # Under fail_closed, a raw malformed snapshot is DATA_STALE, as live
+                # treats it; ordering and identity errors (ReplayError) always stop.
+                if self.invalid_snapshots == "abort" or isinstance(exc, ReplayError):
+                    raise
+                sequence_counts["SNAPSHOT_INVALID"] += 1
+                decision = self._failure(index, snapshot, state, _InvalidSnapshot(str(exc)))
 
             signal_counts[decision["signal"]] += 1
             decisions.append(decision)
@@ -161,6 +237,7 @@ class ReplayRunner:
             "replay_version": REPLAY_VERSION,
             "configuration": self.config.public_dict(),
             "configuration_id": stable_id("config", self.config.public_dict()),
+            "invalid_snapshot_policy": self.invalid_snapshots,
             "input_snapshot_count": len(decisions),
         }
         return {
@@ -263,7 +340,7 @@ class ReplayRunner:
             "execution_permission": "DENIED_HISTORICAL_REPLAY",
             "strategy_validated": False,
             "sequence": {
-                "status": "ASOF_INVALID" if isinstance(exc, AsOfError) else "FEATURE_INVALID",
+                "status": _failure_status(exc),
                 "missing_bars": 0,
             },
             "setup": {**state, "state_updated": False},
@@ -295,6 +372,9 @@ def parser() -> argparse.ArgumentParser:
     source.add_argument("--jsonl", help="normalized-snapshot JSON Lines input")
     source.add_argument("--db", help="observer SQLite database input")
     result.add_argument("--base", default="TAO", help="base asset; TAO by default")
+    result.add_argument("--invalid-snapshots", choices=("abort", "fail_closed"), default="abort",
+                        help="abort on a structurally invalid snapshot (default), or record it as "
+                             "DATA_STALE and continue, as the live service does")
     result.add_argument("--output", required=True, help="immutable replay-result JSON path")
     result.add_argument("--fee-bps-per-side", type=float, default=None,
                         help="assumed exchange fee per side for the risk contract; unknown if omitted")
@@ -315,12 +395,13 @@ def main(argv: list[str] | None = None) -> int:
         config.validate()
     except ValueError as exc:
         parser().error(str(exc))
+    strict = args.invalid_snapshots == "abort"
     snapshots = (
-        load_jsonl_snapshots(args.jsonl)
+        load_jsonl_snapshots(args.jsonl, strict=strict)
         if args.jsonl
-        else load_sqlite_snapshots(args.db, config.research_symbol)
+        else load_sqlite_snapshots(args.db, config.research_symbol, strict=strict)
     )
-    result = ReplayRunner(config).run(snapshots)
+    result = ReplayRunner(config, invalid_snapshots=args.invalid_snapshots).run(snapshots)
     write_replay(result, args.output)
     print(
         json.dumps(

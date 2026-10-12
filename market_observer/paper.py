@@ -17,7 +17,7 @@ from typing import Any, Iterable
 
 from .dataset import DatasetError, validate_dataset_manifest
 from .outcomes import completed_candle_tape
-from .replay import load_jsonl_snapshots
+from .replay import ReplayError, bind_replay_to_snapshots, load_jsonl_snapshots
 from .util import canonical_json, decimal, stable_id
 
 
@@ -81,6 +81,18 @@ def build_paper_fill_artifact(
         raise PaperExecutionError("failure_buffer_atr must be non-negative")
 
     tape = completed_candle_tape(snapshots, config.interval_ms)
+    # Replay records every poll, and one eligible candle can be polled several times.
+    # Each completed candle is one opportunity: its first eligible observation.
+    eligible, seen, duplicate_polls = [], set(), 0
+    for decision in decisions:
+        if decision.get("signal") != "LONG_ELIGIBLE":
+            continue
+        anchor = decision.get("completed_candle_close_time_ms")
+        if anchor in seen:
+            duplicate_polls += 1
+            continue
+        seen.add(anchor)
+        eligible.append(decision)
     fills = [
         _simulate_decision(
             decision,
@@ -88,8 +100,7 @@ def build_paper_fill_artifact(
             config=config,
             failure_buffer_atr=failure_buffer_atr,
         )
-        for decision in decisions
-        if decision.get("signal") == "LONG_ELIGIBLE"
+        for decision in eligible
     ]
 
     baseline_payload = {
@@ -106,6 +117,7 @@ def build_paper_fill_artifact(
         "fills": fills,
         "summary": {
             "eligible_signal_count": len(fills),
+            "duplicate_eligible_polls_count": duplicate_polls,
             "filled_count": sum(fill["status"] == "FILLED" for fill in fills),
             "unavailable_count": sum(fill["status"] == "UNAVAILABLE" for fill in fills),
             "invalidated_before_entry_count": sum(
@@ -332,6 +344,10 @@ def main(argv: list[str] | None = None) -> int:
         raise PaperExecutionError(str(exc)) from exc
 
     replay_result = _read_json_object(args.replay, "replay result")
+    try:
+        bind_replay_to_snapshots(rows, replay_result)
+    except ReplayError as exc:
+        raise PaperExecutionError(str(exc)) from exc
     config = PaperExecutionConfig(
         fee_bps_per_side=decimal(args.fee_bps_per_side),
         slippage_bps_per_side=decimal(args.slippage_bps_per_side),

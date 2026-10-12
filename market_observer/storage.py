@@ -62,6 +62,15 @@ class EventStore:
                 payload_json TEXT NOT NULL,
                 PRIMARY KEY(strategy_id, research_symbol)
             );
+            -- Additive and separate from setup_states, so older observer code can
+            -- still open and use a database written by newer code.
+            CREATE TABLE IF NOT EXISTS setup_state_configurations(
+                strategy_id TEXT NOT NULL,
+                research_symbol TEXT NOT NULL,
+                configuration_id TEXT NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(strategy_id, research_symbol)
+            );
             CREATE TABLE IF NOT EXISTS collection_errors(
                 error_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 received_time_ms INTEGER NOT NULL,
@@ -142,35 +151,98 @@ class EventStore:
         return snapshot_id
 
     def append_decision(self, decision: dict[str, Any]) -> str:
-        decision_id = stable_id("decision", decision)
         with self.db:
-            self.db.execute(
-                "INSERT INTO decisions VALUES(?,?,?,?,?,?)",
-                (
-                    decision_id,
-                    int(decision["decision_time_ms"]),
-                    decision["research_symbol"],
-                    decision["setup"]["state"],
-                    decision["signal"],
-                    canonical_json(decision),
-                ),
-            )
+            return self._insert_decision(decision)
+
+    def commit_cycle(
+        self,
+        decision: dict[str, Any],
+        *,
+        state: dict[str, Any] | None = None,
+        strategy_id: str | None = None,
+        configuration_id: str | None = None,
+    ) -> str:
+        """Record a decision and, if given, its new setup state in one transaction.
+
+        A crash or write error can't leave a state transition without the decision
+        that made it, or the reverse.
+        """
+        with self.db:
+            if state is not None:
+                self._upsert_state(strategy_id, decision["research_symbol"], state, configuration_id)
+            return self._insert_decision(decision)
+
+    def _insert_decision(self, decision: dict[str, Any]) -> str:
+        decision_id = stable_id("decision", decision)
+        self.db.execute(
+            "INSERT INTO decisions VALUES(?,?,?,?,?,?)",
+            (
+                decision_id,
+                int(decision["decision_time_ms"]),
+                decision["research_symbol"],
+                decision["setup"]["state"],
+                decision["signal"],
+                canonical_json(decision),
+            ),
+        )
         return decision_id
 
-    def load_setup_state(self, strategy_id: str, research_symbol: str) -> dict[str, Any] | None:
+    def load_setup_state_record(
+        self, strategy_id: str, research_symbol: str
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """The saved setup state and the rule-configuration ID it was saved under
+        (None if unrecorded, e.g. written by older code)."""
         row = self.db.execute(
             "SELECT payload_json FROM setup_states WHERE strategy_id=? AND research_symbol=?",
             (strategy_id, research_symbol),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        if not row:
+            return None, None
+        config = self.db.execute(
+            "SELECT configuration_id FROM setup_state_configurations WHERE strategy_id=? AND research_symbol=?",
+            (strategy_id, research_symbol),
+        ).fetchone()
+        return json.loads(row[0]), (config[0] if config else None)
 
-    def save_setup_state(self, strategy_id: str, research_symbol: str, state: dict[str, Any]) -> None:
+    def load_setup_state(
+        self, strategy_id: str, research_symbol: str, configuration_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """The saved setup state. With ``configuration_id``, a state saved under a
+        different or unrecorded configuration is not returned."""
+        state, saved = self.load_setup_state_record(strategy_id, research_symbol)
+        if configuration_id is not None and saved != configuration_id:
+            return None
+        return state
+
+    def save_setup_state(
+        self, strategy_id: str, research_symbol: str, state: dict[str, Any], configuration_id: str | None = None
+    ) -> None:
         with self.db:
+            self._upsert_state(strategy_id, research_symbol, state, configuration_id)
+
+    def _upsert_state(
+        self, strategy_id: str, research_symbol: str, state: dict[str, Any], configuration_id: str | None
+    ) -> None:
+        # The state row keeps its original format, so older observer code can still
+        # read a database written by this code; the configuration ID lives beside it.
+        updated = now_ms()
+        self.db.execute(
+            """INSERT INTO setup_states VALUES(?,?,?,?)
+            ON CONFLICT(strategy_id,research_symbol) DO UPDATE SET
+            updated_at_ms=excluded.updated_at_ms,payload_json=excluded.payload_json""",
+            (strategy_id, research_symbol, updated, canonical_json(state)),
+        )
+        if configuration_id is None:
             self.db.execute(
-                """INSERT INTO setup_states VALUES(?,?,?,?)
+                "DELETE FROM setup_state_configurations WHERE strategy_id=? AND research_symbol=?",
+                (strategy_id, research_symbol),
+            )
+        else:
+            self.db.execute(
+                """INSERT INTO setup_state_configurations VALUES(?,?,?,?)
                 ON CONFLICT(strategy_id,research_symbol) DO UPDATE SET
-                updated_at_ms=excluded.updated_at_ms,payload_json=excluded.payload_json""",
-                (strategy_id, research_symbol, now_ms(), canonical_json(state)),
+                configuration_id=excluded.configuration_id,updated_at_ms=excluded.updated_at_ms""",
+                (strategy_id, research_symbol, configuration_id, updated),
             )
 
     def heartbeat(self, status: str, detail: str | None = None) -> None:

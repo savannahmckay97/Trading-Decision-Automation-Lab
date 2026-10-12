@@ -12,11 +12,11 @@ from .evaluator import evaluate_snapshot
 from .features import FeatureError
 from .normalization import build_snapshot
 from .storage import EventStore
-from .util import now_ms
+from .util import now_ms, stable_id
 
 
 class ObserverService:
-    VERSION = "trading-decision-lab-observer-0.2.0"
+    VERSION = "trading-decision-lab-observer-0.3.0"
 
     def __init__(
         self,
@@ -28,6 +28,9 @@ class ObserverService:
         self.config = config
         self.store = store
         self.collectors = collectors or PublicCollectors(config)
+        # Saved setup state is only resumed under the rule settings that produced it;
+        # operational settings (timeouts, polling, cost assumptions) don't count.
+        self.configuration_id = stable_id("state_rules", config.state_rule_dict())
 
     def cycle(self) -> dict[str, Any]:
         events, errors = self.collectors.collect()
@@ -45,15 +48,8 @@ class ObserverService:
                 completed_at_ms=completed_at,
             )
             snapshot_id = self.store.append_snapshot(snapshot)
-            previous = self.store.load_setup_state(STRATEGY_ID, self.config.research_symbol)
+            previous = self._resumable_state()
             evaluation = evaluate_snapshot(snapshot, self.config, previous)
-
-            if evaluation.state_updated:
-                self.store.save_setup_state(
-                    STRATEGY_ID,
-                    self.config.research_symbol,
-                    evaluation.state,
-                )
 
             decision = self._decision(
                 signal=evaluation.signal,
@@ -66,7 +62,12 @@ class ObserverService:
                 risk=evaluation.risk,
                 errors=[error.record() for error in errors],
             )
-            self.store.append_decision(decision)
+            self.store.commit_cycle(
+                decision,
+                state=evaluation.state if evaluation.state_updated else None,
+                strategy_id=STRATEGY_ID,
+                configuration_id=self.configuration_id,
+            )
             self.store.heartbeat(
                 "OK" if evaluation.signal not in {"DATA_STALE", "RISK_BLOCKED"} else "DEGRADED",
                 evaluation.signal,
@@ -77,6 +78,17 @@ class ObserverService:
             self.store.append_decision(decision)
             self.store.heartbeat("DEGRADED", str(exc))
             return decision
+
+    def _resumable_state(self) -> dict[str, Any] | None:
+        """The saved setup if it was formed under these rule settings. A setup saved
+        under other (or unrecorded) rule settings is not resumed: a fresh IDLE state
+        carries the visible transition CONFIGURATION_RESET instead."""
+        state, configuration_id = self.store.load_setup_state_record(STRATEGY_ID, self.config.research_symbol)
+        if state is None or configuration_id == self.configuration_id:
+            return state
+        reset = default_setup_state()
+        reset["transition"] = "CONFIGURATION_RESET"
+        return reset
 
     def _decision(
         self,
@@ -103,6 +115,7 @@ class ObserverService:
             "execution_permission": "DENIED_OBSERVATION_ONLY",
             "strategy_validated": False,
             "setup": {**setup, "state_updated": state_updated},
+            "configuration_id": self.configuration_id,
             "breakout_quality": quality,
             "features": features,
             "gates": gates,
@@ -119,7 +132,7 @@ class ObserverService:
         }
 
     def _failure_decision(self, errors: list, exc: Exception, snapshot_id: str | None) -> dict[str, Any]:
-        setup = self.store.load_setup_state(STRATEGY_ID, self.config.research_symbol) or default_setup_state()
+        setup = self._resumable_state() or default_setup_state()
         return {
             "schema_version": "market_decision/0.3",
             "observer_version": self.VERSION,

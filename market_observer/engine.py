@@ -85,12 +85,14 @@ def assess_gates(snapshot: dict[str, Any], features: dict[str, Any], config: Obs
         {"spread_bps": spread, "maximum_bps": config.max_spread_bps},
         "RISK_BLOCKED",
     )
-    divergence = features.get("cross_venue_divergence_bps")
+    ask_divergence = features.get("executable_ask_divergence_bps")
     add(
         "T0_VENUE_CONFIRMATION",
-        divergence is not None and divergence <= decimal(config.max_cross_venue_divergence_bps),
+        ask_divergence is not None and ask_divergence <= decimal(config.max_cross_venue_divergence_bps),
         {
-            "divergence_bps": divergence,
+            "executable_ask_divergence_bps": ask_divergence,
+            "last_trade_divergence_bps": features.get("cross_venue_divergence_bps"),
+            "gated_on": "KRAKEN_ASK_VS_BINANCE_LAST",
             "maximum_bps": config.max_cross_venue_divergence_bps,
             "research_quote": "USDT",
             "executable_quote": "USD",
