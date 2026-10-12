@@ -71,18 +71,22 @@ are the owner's to change before any prospective evidence exists.
 
 - **Entry:** a post-only buy limit at `min(signal close, next bar open)`,
   resting up to `entry_ttl_bars` (2). It fills only if price trades *strictly
-  below* the limit; touching is not a fill. If a bar closes below invalidation
-  first, or the TTL lapses, the order is cancelled and the account is untouched
-  (`NOT_FILLED_*`). Fill rate is therefore an output, and unfilled winners are
+  below* the limit; touching is not a fill. A fill is processed before anything
+  known only at the bar's close: a bar that trades through the limit fills, and a
+  close below invalidation afterwards exits the position. Only a bar that doesn't
+  fill and closes below invalidation cancels the order; so does a lapsed TTL. Then
+  the account is untouched (`NOT_FILLED_*`). The committed quantity is rechecked at
+  the limit against cash (no leverage, fee included) and the risk budget. Fill rate is therefore an output, and unfilled winners are
   a real cost of maker entries.
 - **Take-profits:** staggered sell limits (maker) at +1R (30%) and +2R (30%),
-  where R = limit price − emergency stop. They fill when price trades strictly
+  where R = committed limit price − emergency stop (reported per trade as
+  `price_r_unit` and `take_profit_levels`). They fill when price trades strictly
   above the level, at the level, and are not credited on the entry bar.
 - **Trailing stop:** the remainder (40%) trails. The stop level is
   `max(emergency stop, highest completed high before this bar − 2 × breakout ATR)`;
-  it only ratchets up and applies to the whole open quantity from the entry bar,
-  so it starts as the emergency stop. Taker, fills at the level or the bar open
-  if price gapped through.
+  it only ratchets up. On the entry bar only the emergency stop applies; the
+  trail uses highs of bars completed after entry, never the entry bar's own high.
+  Taker, fills at the level or the bar open if price gapped through.
 - **Other exits (taker):** close below invalidation, max-hold close.
 - **Within a bar a stop beats a target** (intrabar order is unknown).
 - **Costs:** maker legs pay only the maker fee (no spread, no slippage); taker
@@ -109,16 +113,30 @@ python -m market_observer.governor \
 
 Decisions are processed in completed-close order on one account:
 
+- **Proposals:** `LONG_ELIGIBLE` decisions only, first observation per completed
+  candle (repeated polls are counted as `duplicate_polls`, not traded). Other
+  records, including `DATA_STALE` failures without a candle anchor, are counted;
+  observation order is checked by `observed_at_ms` and `snapshot_index`.
 - **Entry:** next bar open after `LONG_ELIGIBLE`. If that open is at or below
-  invalidation, the trade is not entered.
+  invalidation, the trade is not entered. The quantity committed at the fill is
+  at most the reference-sized quantity, reduced if needed so notional plus entry
+  fee fits the cash cap and the loss to the emergency stop plus costs, measured
+  from the actual entry, fits the risk budget (`resize_reasons`).
 - **Exits, checked in this order within each bar:** emergency stop, close below
   invalidation, then the max-hold close.
 - **Costs:** paper conventions (half the signal spread plus slippage per side,
   and the fee on effective notional each side).
-- **Account updates:** a position's realised P&L applies at its exit bar. A new
-  UTC day resets the daily loss and the loss streak.
-- **Censoring:** a missing future path ends the simulation. Later proposals are
-  `NOT_EVALUATED`, because account state after that point is unknown.
+- **Account updates:** each leg (entry fee, each take-profit, the final exit) is
+  booked at its own bar, on its own UTC day. A new UTC day resets the daily loss
+  and the loss streak; the streak counts whole positions. Drawdown
+  (`max_realized_drawdown_usd`) is on realised equity after each leg, not marked
+  to market.
+- **Censoring:** bars are consumed one at a time until the order or position
+  ends. A missing bar while an order or position is open ends the simulation, and
+  later proposals are `NOT_EVALUATED`; bars missing after the exit don't matter.
+- **Malformed input blocks explicitly:** non-finite or non-positive ATR or prices,
+  stop geometry other than `0 < emergency stop ≤ invalidation < reference`,
+  negative or non-finite costs, a missing spread, and invalid account state.
 
 The artifact is immutable, deterministic (`governed_paper_id`) and states
 `performance_claim_available: false`.
@@ -132,7 +150,8 @@ slippage and a 16-bar max hold:
 
 - **Proposals:** 17. 15 were approved and filled; 2 were blocked by the position limit.
 - **Exits:** 7 emergency stop, 4 close below invalidation, 4 max hold.
-- **Account:** $1,000 → $957.64. Sum of realised R −8.6; maximum drawdown $44.14.
+- **Account:** $1,000 → $957.64. Sum of realised R −8.6; maximum drawdown $44.14
+  (first run, before the issue #22 fixes; see the rerun below).
 - **Costs:** the modelled round-trip cost (93.35 bps) was on average **50% of each
   trade's risk budget.**
 
@@ -159,14 +178,24 @@ Same backfill, same assumptions, plus an assumed Kraken spot **maker fee of 25 b
 
 | | MARKET_BASELINE | MAKER_STAGGERED |
 |---|---|---|
-| Approved / filled | 15 / 15 | 15 / 12 (3 entries never filled) |
-| Exits | 7 emergency, 4 invalidation, 4 hold | 3 emergency, 6 trailing, 2 invalidation, 1 hold |
-| Sum realised R | −8.63 | −6.21 |
-| Ending equity | $957.64 | $969.37 |
+Rerun 2026-10-13 after fixing the issue #22 findings G1–G7 and per-leg
+settlement, with the same assumptions. The first run's numbers came from the
+faulty model and are superseded: G1 had cancelled three maker entries that had
+in fact filled (two of them losers), and G2 had trailed stops from the entry
+bar's own high.
+
+| | MARKET_BASELINE | MAKER_STAGGERED |
+|---|---|---|
+| Approved / filled | 15 / 15 | 15 / 15 (first run: 12) |
+| Exits | 7 emergency, 4 invalidation, 4 hold | 5 emergency, 6 trailing, 3 invalidation, 1 hold |
+| Sum realised R | −8.33 (first run −8.63) | −7.75 (first run −6.21) |
+| Ending equity | $959.09 (first run $957.64) | $961.90 (first run $969.37) |
+| Max realised drawdown | $43.69 | $41.29 |
 | Mean cost share of risk budget | 50% | 43% |
 
-Maker-first helps but does not fix the cost problem at the lowest fee tier:
-25 bps maker is still 50 bps round trip before the exit. The structural lever is
+Maker-first helps only marginally (about $3 here, not the $12 first reported)
+and does not fix the cost problem at the lowest fee tier: 25 bps maker is still
+50 bps round trip before the exit. The structural lever is
 a lower fee tier, a venue with near-zero or rebated maker fees, or stops wide
 enough that costs are a small share of risk. n = 15 on reconstructed history:
 this is plumbing, not evidence about the strategy.

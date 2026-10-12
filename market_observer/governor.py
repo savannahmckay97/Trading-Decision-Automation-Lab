@@ -131,17 +131,31 @@ def utc_day(timestamp_ms: int) -> str:
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
+def _finite(value: Any) -> Decimal | None:
+    try:
+        result = decimal(value)
+    except (TypeError, ValueError, ArithmeticError):
+        return None
+    return result if result.is_finite() else None
+
+
 def assess_trade(
     decision: dict[str, Any],
     account: PaperAccount,
     config: GovernorConfig,
     round_trip_cost_bps: Any | None = None,
+    *,
+    fall_back_to_decision_costs: bool = True,
 ) -> dict[str, Any]:
     """Approve a sized paper trade or block it, reporting every failed check.
 
-    ``round_trip_cost_bps`` overrides the decision's own modelled cost (used by
-    governed replay, where costs come from the paper configuration). Without a
-    complete cost the proposal is blocked: an unknown cost is never zero.
+    ``round_trip_cost_bps`` overrides the decision's own modelled cost. Governed
+    replay passes ``fall_back_to_decision_costs=False``: its costs come only from
+    the paper configuration, so a missing input (such as the spread) blocks rather
+    than silently using the decision's figure. Without a complete cost the
+    proposal is blocked: an unknown cost is never zero.
+    Malformed geometry, costs or account state block with an explicit reason;
+    nothing malformed reaches sizing.
     """
 
     base = {
@@ -154,11 +168,16 @@ def assess_trade(
         return {**base, "status": "NOT_A_PROPOSAL", "reasons": [f"signal_{decision.get('signal')}"]}
 
     reasons: list[str] = []
+    equity = _finite(account.equity_usd)
+    start_of_day = _finite(account.start_of_day_equity_usd)
+    daily = _finite(account.daily_realized_pnl_usd)
+    if equity is None or equity <= 0 or start_of_day is None or start_of_day < 0 or daily is None:
+        return {**base, "status": "BLOCKED", "reasons": ["ACCOUNT_STATE_INVALID"]}
     if config.kill_switch:
         reasons.append("KILL_SWITCH_ENGAGED")
     if account.open_position is not None:
         reasons.append("POSITION_LIMIT_REACHED")
-    if account.daily_realized_pnl_usd <= -account.start_of_day_equity_usd * config.max_daily_loss_fraction:
+    if daily <= -start_of_day * config.max_daily_loss_fraction:
         reasons.append("DAILY_LOSS_LIMIT_REACHED")
     if account.consecutive_losses >= config.max_consecutive_losses:
         reasons.append("CONSECUTIVE_LOSS_LIMIT_REACHED")
@@ -169,42 +188,55 @@ def assess_trade(
         reasons.append("RISK_CONTRACT_UNAVAILABLE")
     else:
         try:
-            levels["reference"] = decimal(risk["reference_price"]["value"])
-            levels["invalidation"] = decimal(risk["invalidation"]["level"])
-            levels["atr"] = decimal(risk["invalidation"]["derivation"]["breakout_atr"])
-        except (KeyError, TypeError, ValueError):
+            raw = {
+                "reference": risk["reference_price"]["value"],
+                "invalidation": risk["invalidation"]["level"],
+                "atr": risk["invalidation"]["derivation"]["breakout_atr"],
+            }
+        except (KeyError, TypeError):
+            raw = None
+        parsed = {key: _finite(value) for key, value in (raw or {}).items()}
+        if raw is None or any(value is None for value in parsed.values()):
             reasons.append("RISK_CONTRACT_MALFORMED")
-            levels = {}
+        else:
+            levels = parsed
     if levels:
         levels["emergency_stop"] = levels["invalidation"] - config.emergency_stop_atr * levels["atr"]
-        if levels["emergency_stop"] <= 0 or levels["reference"] <= levels["invalidation"]:
+        # A long needs 0 < emergency stop <= invalidation < reference, from a positive ATR.
+        if not (levels["atr"] > 0 and 0 < levels["emergency_stop"] <= levels["invalidation"] < levels["reference"]):
             reasons.append("INVALID_STOP_GEOMETRY")
 
-    if round_trip_cost_bps is None and isinstance(risk, dict):
+    if round_trip_cost_bps is None and fall_back_to_decision_costs and isinstance(risk, dict):
         round_trip_cost_bps = (risk.get("costs") or {}).get("modelled_round_trip_bps")
     if round_trip_cost_bps is None:
         reasons.append("COSTS_INCOMPLETE")
+    else:
+        round_trip_cost_bps = _finite(round_trip_cost_bps)
+        if round_trip_cost_bps is None or round_trip_cost_bps < 0:
+            reasons.append("COSTS_INVALID")
 
     if reasons:
         return {**base, "status": "BLOCKED", "reasons": reasons}
 
     sizing = maximum_quantity(
-        equity_usd=account.equity_usd,
+        equity_usd=equity,
         risk_fraction=config.risk_fraction,
         entry_price=levels["reference"],
         invalidation_price=levels["emergency_stop"],
         round_trip_cost_bps=round_trip_cost_bps,
-        max_notional_usd=account.equity_usd * config.max_notional_fraction,
+        max_notional_usd=equity * config.max_notional_fraction,
     )
     return {
         **base,
         "status": "APPROVED_FOR_PAPER",
         "reasons": [],
+        # Sized at the reference close. The simulator commits a quantity at the
+        # modelled fill, which may be smaller (cash and risk are rechecked there).
         "quantity": sizing["maximum_quantity"],
         "risk_budget_usd": sizing["risk_budget_usd"],
         "sizing_reference_price": levels["reference"],
         "notional_cap_binding": sizing["maximum_quantity"] * levels["reference"]
-        >= account.equity_usd * config.max_notional_fraction,
+        >= equity * config.max_notional_fraction,
         "exits": {
             "setup_invalidation": {"level": levels["invalidation"], "rule": "COMPLETED_CLOSE_BELOW"},
             "emergency_stop": {
@@ -214,18 +246,63 @@ def assess_trade(
             },
             "time_exit": "MAX_HOLD_CLOSE",
             **({} if config.execution_model == "MARKET_BASELINE" else {
+                # Levels are set from the committed maker entry, not the reference;
+                # the simulator reports the actual levels used.
                 "take_profit_limits": [
-                    {"r_multiple": r, "fraction": f, "level": levels["reference"] + r * (levels["reference"] - levels["emergency_stop"]),
+                    {"r_multiple": r, "fraction": f, "basis": "COMMITTED_ENTRY_MINUS_EMERGENCY_STOP",
                      "liquidity": "MAKER"}
                     for r, f in config.take_profit_tranches],
                 "trailing_stop": {"trail_atr": config.trail_atr, "floor": levels["emergency_stop"],
                                   "rule": "HIGHEST_COMPLETED_HIGH_MINUS_TRAIL_ATR_RATCHET_UP",
+                                  "entry_bar_rule": "EMERGENCY_FLOOR_ONLY",
                                   "liquidity": "TAKER"},
             }),
         },
-        "round_trip_cost_bps": decimal(round_trip_cost_bps),
+        "round_trip_cost_bps": round_trip_cost_bps,
         "gap_loss_bounded": False,
     }
+
+
+def _proposals(decisions: list[Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Eligible proposals in candle order, first observation per candle.
+
+    Observation records (including DATA_STALE failures, which deliberately carry
+    no candle anchor) are checked for chronological order by their own fields;
+    only LONG_ELIGIBLE proposals need an anchor. Repeated polls of one eligible
+    candle are one proposal; the duplicates are counted, not traded.
+    """
+
+    previous: tuple[int, int] | None = None
+    proposals: list[dict[str, Any]] = []
+    counts = {"observations": 0, "non_proposals": 0, "duplicate_polls": 0}
+    for item in decisions:
+        if not isinstance(item, dict):
+            raise GovernorError("every decision must be an object")
+        counts["observations"] += 1
+        order = (item.get("observed_at_ms"), item.get("snapshot_index"))
+        if all(value is not None for value in order):
+            key = (int(order[0]), int(order[1]))
+            if previous is not None and key < previous:
+                raise GovernorError("replay decisions are not in observation order")
+            previous = key
+        if item.get("signal") != "LONG_ELIGIBLE":
+            counts["non_proposals"] += 1
+            continue
+        try:
+            int(item["completed_candle_close_time_ms"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GovernorError("a LONG_ELIGIBLE decision needs completed_candle_close_time_ms") from exc
+        proposals.append(item)
+    proposals.sort(key=lambda item: int(item["completed_candle_close_time_ms"]))
+    unique, seen = [], set()
+    for item in proposals:
+        anchor = int(item["completed_candle_close_time_ms"])
+        if anchor in seen:
+            counts["duplicate_polls"] += 1
+            continue
+        seen.add(anchor)
+        unique.append(item)
+    return unique, counts
 
 
 def build_governed_paper_artifact(
@@ -236,7 +313,7 @@ def build_governed_paper_artifact(
     paper_config: PaperExecutionConfig,
     config: GovernorConfig,
 ) -> dict[str, Any]:
-    """Run every replay decision through the governor on one paper account."""
+    """Run every replay proposal through the governor on one paper account."""
 
     if not dataset_id:
         raise GovernorError("dataset_id is required")
@@ -246,10 +323,7 @@ def build_governed_paper_artifact(
     decisions = replay_result.get("decisions")
     if not replay_id or not isinstance(decisions, list):
         raise GovernorError("replay_result must contain replay_id and decisions")
-    try:
-        ordered = sorted(decisions, key=lambda item: int(item["completed_candle_close_time_ms"]))
-    except (KeyError, TypeError, ValueError) as exc:
-        raise GovernorError("every decision needs completed_candle_close_time_ms") from exc
+    ordered, observation_counts = _proposals(decisions)
 
     tape = completed_candle_tape(snapshots, paper_config.interval_ms)
     account = PaperAccount(equity_usd=config.starting_equity_usd, peak_equity_usd=config.starting_equity_usd)
@@ -259,18 +333,23 @@ def build_governed_paper_artifact(
     censored_at: str | None = None
 
     def settle_until(time_ms: int) -> None:
+        """Book each leg (entry fee, take-profits, final exit) on its own bar and UTC day."""
         nonlocal max_drawdown
         position = account.open_position
-        if position is None or position["exit"]["bar_close_time_ms"] > time_ms:
+        if position is None:
             return
-        account.roll_to(utc_day(position["exit"]["bar_close_time_ms"]))
-        pnl = position["net_pnl_usd"]
-        account.equity_usd += pnl
-        account.daily_realized_pnl_usd += pnl
-        account.consecutive_losses = account.consecutive_losses + 1 if pnl < 0 else 0
-        account.peak_equity_usd = max(account.peak_equity_usd, account.equity_usd)
-        max_drawdown = max(max_drawdown, account.peak_equity_usd - account.equity_usd)
-        account.open_position = None
+        pending = position["_pending_events"]
+        while pending and pending[0]["time_ms"] <= time_ms:
+            event = pending.pop(0)
+            account.roll_to(utc_day(event["time_ms"]))
+            account.equity_usd += event["pnl_usd"]
+            account.daily_realized_pnl_usd += event["pnl_usd"]
+            account.peak_equity_usd = max(account.peak_equity_usd, account.equity_usd)
+            max_drawdown = max(max_drawdown, account.peak_equity_usd - account.equity_usd)
+        if not pending:
+            account.consecutive_losses = account.consecutive_losses + 1 if position["net_pnl_usd"] < 0 else 0
+            del position["_pending_events"]
+            account.open_position = None
 
     for decision in ordered:
         anchor = int(decision["completed_candle_close_time_ms"])
@@ -281,21 +360,19 @@ def build_governed_paper_artifact(
         settle_until(anchor)
         account.roll_to(utc_day(anchor))
         cost_bps = _paper_round_trip_bps(decision, paper_config, config)
-        verdict = assess_trade(decision, account, config, cost_bps)
-        if verdict["status"] == "NOT_A_PROPOSAL":
-            continue
+        verdict = assess_trade(decision, account, config, cost_bps, fall_back_to_decision_costs=False)
         if verdict["status"] == "APPROVED_FOR_PAPER":
             simulate = _simulate_position if config.execution_model == "MARKET_BASELINE" else _simulate_maker_staggered
-            outcome = simulate(decision, verdict, tape, paper_config, config)
+            outcome = simulate(decision, verdict, tape, paper_config, config, account.equity_usd)
             verdict["paper_outcome"] = outcome["status"]
             if outcome["status"] == "CENSORED":
                 censored_at = verdict["decision_id"]
             elif outcome["status"] == "FILLED":
-                account.open_position = outcome
+                account.open_position = {**outcome, "_pending_events": list(outcome["events"])}
                 trades.append(outcome)
         journal.append(verdict)
     if account.open_position is not None:
-        settle_until(account.open_position["exit"]["bar_close_time_ms"])
+        settle_until(account.open_position["events"][-1]["time_ms"])
 
     blocked = [row for row in journal if row["status"] == "BLOCKED"]
     reason_counts: dict[str, int] = {}
@@ -310,12 +387,13 @@ def build_governed_paper_artifact(
         "paper_configuration": paper_config.public_dict(),
     }
     return {
-        "schema_version": "governed_paper_artifact/0.2",
+        "schema_version": "governed_paper_artifact/0.3",
         "governed_paper_id": stable_id("governed_paper", baseline),
         **baseline,
         "journal": journal,
         "trades": trades,
         "summary": {
+            **{f"{key}_count": value for key, value in observation_counts.items()},
             "proposal_count": len(journal),
             "approved_count": sum(row["status"] == "APPROVED_FOR_PAPER" for row in journal),
             "blocked_count": len(blocked),
@@ -323,19 +401,23 @@ def build_governed_paper_artifact(
             "filled_trade_count": len(trades),
             "starting_equity_usd": config.starting_equity_usd,
             "ending_equity_usd": account.equity_usd,
-            "max_drawdown_usd": max_drawdown,
+            # Peak-to-trough of equity after each booked leg; open positions are not
+            # marked to market, so intratrade drawdown is not included.
+            "max_realized_drawdown_usd": max_drawdown,
             "censored_at_decision_id": censored_at,
             "performance_claim_available": False,
             "execution_permission": "NONE",
         },
         "limitations": [
             "Paper simulation on research-venue candles; not Kraken executions and not evidence of profitability",
-            "Sizing uses the completed close; the fill is the next bar open, so realised risk can differ",
+            "Sizing uses the completed close; the simulator commits at most that quantity at the modelled fill, rechecking cash and risk",
             "MARKET_BASELINE has no take-profit; MAKER_STAGGERED fills are assumed when price trades strictly through a resting limit, ignoring queue position, partial fills and adverse selection, so maker savings are an upper bound",
+            "Within a bar the order of events is unknown: a fill comes before a stop, and a stop before a target, the conservative order in each case",
             "Tranche sizes, R multiples, entry TTL and trail width are owner-chosen a priori defaults, not validated or fitted",
             "Gaps through the emergency stop fill at the worse bar open; loss is not bounded",
             "Funding, depth, latency and partial fills are not modelled",
-            "A censored future path ends the account simulation; later proposals are not evaluated",
+            "Drawdown is on realised equity after each leg, not marked to market",
+            "A censored path while an order or position is open ends the account simulation; later proposals are not evaluated",
         ],
     }
 
@@ -343,11 +425,8 @@ def build_governed_paper_artifact(
 def _paper_round_trip_bps(
     decision: dict[str, Any], paper_config: PaperExecutionConfig, config: GovernorConfig
 ) -> Decimal | None:
-    try:
-        spread = decimal((decision.get("features") or {})["spread_bps"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if spread < 0:
+    spread = _finite((decision.get("features") or {}).get("spread_bps"))
+    if spread is None or spread < 0:
         return None
     if config.execution_model == "MARKET_BASELINE":
         return spread + 2 * (paper_config.fee_bps_per_side + paper_config.slippage_bps_per_side)
@@ -359,51 +438,94 @@ def _paper_round_trip_bps(
             + paper_config.slippage_bps_per_side + spread / 2)
 
 
+def _committed_quantity(
+    verdict: dict[str, Any], entry_price: Decimal, entry_fee_bps: Decimal, stop: Decimal,
+    equity_usd: Decimal, config: GovernorConfig,
+) -> tuple[Decimal, list[str]]:
+    """The quantity actually committed at the modelled fill.
+
+    Never more than the reference-sized quantity; reduced so that notional plus
+    entry fee fits the no-leverage cash cap, and so that the loss to the
+    emergency stop plus round-trip costs, measured from the actual entry, stays
+    within the risk budget.
+    """
+
+    reasons: list[str] = []
+    quantity = verdict["quantity"]
+    cash_cap = equity_usd * config.max_notional_fraction / (entry_price * (1 + entry_fee_bps / TEN_THOUSAND))
+    if cash_cap < quantity:
+        quantity, reasons = cash_cap, reasons + ["RESIZED_TO_CASH_AT_FILL"]
+    per_unit_risk = entry_price - stop + entry_price * verdict["round_trip_cost_bps"] / TEN_THOUSAND
+    risk_cap = verdict["risk_budget_usd"] / per_unit_risk
+    if risk_cap < quantity:
+        quantity, reasons = risk_cap, reasons + ["RESIZED_TO_RISK_AT_FILL"]
+    return quantity, reasons
+
+
+def _bar(tape: dict[int, dict[str, Any]], anchor: int, step: int, paper_config: PaperExecutionConfig):
+    return tape.get(anchor + step * paper_config.interval_ms)
+
+
 def _simulate_position(
     decision: dict[str, Any],
     verdict: dict[str, Any],
     tape: dict[int, dict[str, Any]],
     paper_config: PaperExecutionConfig,
-    config: GovernorConfig | None = None,
+    config: GovernorConfig,
+    equity_usd: Decimal,
 ) -> dict[str, Any]:
     """Enter at the next bar open; exit on the emergency stop, a close below
-    invalidation, or the max-hold close, in that order within each bar."""
+    invalidation, or the max-hold close, in that order within each bar.
+
+    Bars are consumed one at a time until the exit: a missing bar censors the
+    trade only while the position is still open.
+    """
 
     anchor = int(decision["completed_candle_close_time_ms"])
-    times = [anchor + step * paper_config.interval_ms for step in range(1, paper_config.max_hold_bars + 1)]
-    if any(timestamp not in tape for timestamp in times):
-        return {"status": "CENSORED", "decision_id": verdict["decision_id"]}
-    path = [tape[timestamp] for timestamp in times]
     invalidation = verdict["exits"]["setup_invalidation"]["level"]
     stop = verdict["exits"]["emergency_stop"]["level"]
-    raw_entry = path[0]["open"]
+    first = _bar(tape, anchor, 1, paper_config)
+    if first is None:
+        return {"status": "CENSORED", "decision_id": verdict["decision_id"]}
+    raw_entry = first["open"]
     if raw_entry <= invalidation:
         return {"status": "NOT_ENTERED_OPEN_AT_OR_BELOW_INVALIDATION", "decision_id": verdict["decision_id"]}
 
-    reason, exit_bar, raw_exit = "MAX_HOLD", path[-1], path[-1]["close"]
-    for bar in path:
+    friction = decimal(decision["features"]["spread_bps"]) / 2 + paper_config.slippage_bps_per_side
+    entry = _buy_price(raw_entry, friction)
+    fee_rate = paper_config.fee_bps_per_side / TEN_THOUSAND
+    quantity, resized = _committed_quantity(verdict, entry, paper_config.fee_bps_per_side, stop, equity_usd, config)
+
+    reason = exit_bar = raw_exit = None
+    for step in range(1, paper_config.max_hold_bars + 1):
+        bar = first if step == 1 else _bar(tape, anchor, step, paper_config)
+        if bar is None:
+            return {"status": "CENSORED", "decision_id": verdict["decision_id"]}
         if bar["low"] <= stop:
-            reason, exit_bar = "EMERGENCY_STOP", bar
-            raw_exit = min(bar["open"], stop)
+            reason, exit_bar, raw_exit = "EMERGENCY_STOP", bar, min(bar["open"], stop)
             break
         if bar["close"] < invalidation:
             reason, exit_bar, raw_exit = "SETUP_INVALIDATED_ON_CLOSE", bar, bar["close"]
             break
+        if step == paper_config.max_hold_bars:
+            reason, exit_bar, raw_exit = "MAX_HOLD", bar, bar["close"]
 
-    half_spread = decimal(decision["features"]["spread_bps"]) / 2
-    friction = half_spread + paper_config.slippage_bps_per_side
-    entry = _buy_price(raw_entry, friction)
     exit_ = _sell_price(raw_exit, friction)
-    quantity = verdict["quantity"]
-    fees = (entry + exit_) * paper_config.fee_bps_per_side / TEN_THOUSAND
-    net_pnl = quantity * (exit_ - entry - fees)
+    entry_fee = quantity * entry * fee_rate
+    exit_pnl = quantity * (exit_ - entry) - quantity * exit_ * fee_rate
+    events = [{"time_ms": first["close_time_ms"], "kind": "ENTRY_FEE", "pnl_usd": -entry_fee},
+              {"time_ms": exit_bar["close_time_ms"], "kind": reason, "pnl_usd": exit_pnl}]
+    net_pnl = exit_pnl - entry_fee
     return {
         "status": "FILLED",
         "decision_id": verdict["decision_id"],
+        "reference_quantity": verdict["quantity"],
         "quantity": quantity,
-        "entry": {"raw_price": raw_entry, "effective_price": entry, "bar_close_time_ms": path[0]["close_time_ms"]},
+        "resize_reasons": resized,
+        "entry": {"raw_price": raw_entry, "effective_price": entry, "bar_close_time_ms": first["close_time_ms"]},
         "exit": {"reason": reason, "raw_price": raw_exit, "effective_price": exit_,
                  "bar_close_time_ms": exit_bar["close_time_ms"]},
+        "events": events,
         "net_pnl_usd": net_pnl,
         "realized_r": net_pnl / verdict["risk_budget_usd"],
     }
@@ -415,88 +537,111 @@ def _simulate_maker_staggered(
     tape: dict[int, dict[str, Any]],
     paper_config: PaperExecutionConfig,
     config: GovernorConfig,
+    equity_usd: Decimal,
 ) -> dict[str, Any]:
     """Maker entry, staggered maker take-profits, taker trailing stop.
 
     Conservative fill rules, because the candle tape has no queue or tick data:
     a resting limit fills only when price trades strictly through it, at its own
-    price (no price improvement); within one bar a stop beats a target; targets
-    are not credited on the entry bar; the stop level for a bar uses only highs
-    completed before that bar. Stops, the close rule and the time exit are taker.
+    price (no price improvement). A fill is processed before anything that can
+    only be known at the bar's close, so a close below invalidation after a fill
+    exits the position rather than cancelling the entry. Within one bar a stop
+    beats a target, and targets are not credited on the entry bar. The entry bar
+    is protected by the emergency floor only; the trail ratchets from highs of
+    completed bars after entry. Price R and targets use the committed entry.
+    Stops, the close rule and the time exit are taker.
     """
 
     anchor = int(decision["completed_candle_close_time_ms"])
-    times = [anchor + step * paper_config.interval_ms for step in range(1, paper_config.max_hold_bars + 1)]
-    if any(timestamp not in tape for timestamp in times):
-        return {"status": "CENSORED", "decision_id": verdict["decision_id"]}
-    path = [tape[timestamp] for timestamp in times]
     invalidation = verdict["exits"]["setup_invalidation"]["level"]
     floor = verdict["exits"]["emergency_stop"]["level"]
-    reference = verdict["sizing_reference_price"]
-    r_unit = reference - floor
-    quantity = verdict["quantity"]
     maker, taker = config.maker_fee_bps, paper_config.fee_bps_per_side
     taker_friction = decimal(decision["features"]["spread_bps"]) / 2 + paper_config.slippage_bps_per_side
 
+    first = _bar(tape, anchor, 1, paper_config)
+    if first is None:
+        return {"status": "CENSORED", "decision_id": verdict["decision_id"]}
     # Post-only buy placed at the first bar's open, never above the signal close.
-    limit = min(reference, path[0]["open"])
-    fill_index = None
-    for index, bar in enumerate(path[: config.entry_ttl_bars]):
+    limit = min(verdict["sizing_reference_price"], first["open"])
+    if limit <= floor:
+        return {"status": "NOT_ENTERED_OPEN_AT_OR_BELOW_STOP", "decision_id": verdict["decision_id"]}
+    fill_step = None
+    for step in range(1, min(config.entry_ttl_bars, paper_config.max_hold_bars) + 1):
+        bar = first if step == 1 else _bar(tape, anchor, step, paper_config)
+        if bar is None:
+            return {"status": "CENSORED", "decision_id": verdict["decision_id"]}
+        if bar["low"] < limit:
+            fill_step = step
+            break
         if bar["close"] < invalidation:
             return {"status": "NOT_FILLED_SETUP_INVALIDATED", "decision_id": verdict["decision_id"]}
-        if bar["low"] < limit:
-            fill_index = index
-            break
-    if fill_index is None:
+    if fill_step is None:
         return {"status": "NOT_FILLED_TTL_EXPIRED", "decision_id": verdict["decision_id"]}
 
-    atr = decimal(verdict["exits"]["trailing_stop"]["trail_atr"]) * decimal(
+    quantity, resized = _committed_quantity(verdict, limit, maker, floor, equity_usd, config)
+    trail = decimal(verdict["exits"]["trailing_stop"]["trail_atr"]) * decimal(
         decision["risk"]["invalidation"]["derivation"]["breakout_atr"])
+    r_unit = limit - floor
     targets = [[limit + r * r_unit, quantity * f, r] for r, f in config.take_profit_tranches]
     legs: list[dict[str, Any]] = []
     remaining = quantity
-    high_so_far = path[fill_index]["high"]
+    high_so_far: Decimal | None = None  # highs of completed bars after entry only
+    fill_bar = None
 
     def leg(reason, liquidity, raw, qty, bar):
         effective = raw if liquidity == "MAKER" else _sell_price(raw, taker_friction)
         fee = qty * effective * (maker if liquidity == "MAKER" else taker) / TEN_THOUSAND
         legs.append({"reason": reason, "liquidity": liquidity, "quantity": qty, "raw_price": raw,
-                     "effective_price": effective, "fee_usd": fee, "bar_close_time_ms": bar["close_time_ms"]})
+                     "effective_price": effective, "fee_usd": fee, "bar_close_time_ms": bar["close_time_ms"],
+                     "pnl_usd": qty * (effective - limit) - fee})
 
-    for index in range(fill_index, len(path)):
-        bar = path[index]
-        level = max(floor, high_so_far - atr)
+    last_bar = None
+    for step in range(fill_step, paper_config.max_hold_bars + 1):
+        bar = first if step == 1 else _bar(tape, anchor, step, paper_config)
+        if bar is None:
+            return {"status": "CENSORED", "decision_id": verdict["decision_id"]}
+        if fill_bar is None:
+            fill_bar = bar
+        last_bar = bar
+        level = floor if high_so_far is None else max(floor, high_so_far - trail)
         if bar["low"] <= level:
             reason = "TRAILING_STOP" if level > floor else "EMERGENCY_STOP"
             leg(reason, "TAKER", min(bar["open"], level), remaining, bar)
             remaining = Decimal(0)
             break
-        if index > fill_index:
+        if step > fill_step:
             for target in targets:
                 if target[1] > 0 and bar["high"] > target[0]:
                     leg(f"TAKE_PROFIT_{target[2]}R", "MAKER", target[0], target[1], bar)
                     remaining -= target[1]
                     target[1] = Decimal(0)
-            if bar["close"] < invalidation:
-                leg("SETUP_INVALIDATED_ON_CLOSE", "TAKER", bar["close"], remaining, bar)
-                remaining = Decimal(0)
-                break
-        high_so_far = max(high_so_far, bar["high"])
+        if bar["close"] < invalidation:
+            leg("SETUP_INVALIDATED_ON_CLOSE", "TAKER", bar["close"], remaining, bar)
+            remaining = Decimal(0)
+            break
+        high_so_far = bar["high"] if high_so_far is None else max(high_so_far, bar["high"])
     if remaining > 0:
-        leg("MAX_HOLD", "TAKER", path[-1]["close"], remaining, path[-1])
+        leg("MAX_HOLD", "TAKER", last_bar["close"], remaining, last_bar)
 
     entry_fee = quantity * limit * maker / TEN_THOUSAND
-    net_pnl = sum((item["quantity"] * item["effective_price"] - item["fee_usd"] for item in legs),
-                  Decimal(0)) - quantity * limit - entry_fee
+    events = [{"time_ms": fill_bar["close_time_ms"], "kind": "ENTRY_FEE", "pnl_usd": -entry_fee}]
+    events += [{"time_ms": item["bar_close_time_ms"], "kind": item["reason"], "pnl_usd": item["pnl_usd"]}
+               for item in legs]
+    net_pnl = sum((event["pnl_usd"] for event in events), Decimal(0))
     return {
         "status": "FILLED",
         "decision_id": verdict["decision_id"],
+        "reference_quantity": verdict["quantity"],
         "quantity": quantity,
+        "resize_reasons": resized,
         "entry": {"raw_price": limit, "effective_price": limit, "liquidity": "MAKER",
-                  "bar_close_time_ms": path[fill_index]["close_time_ms"], "fee_usd": entry_fee},
+                  "bar_close_time_ms": fill_bar["close_time_ms"], "fee_usd": entry_fee},
+        "price_r_unit": r_unit,
+        "take_profit_levels": [target[0] for target in targets],
         "legs": legs,
         "exit": {"reason": legs[-1]["reason"], "raw_price": legs[-1]["raw_price"],
                  "effective_price": legs[-1]["effective_price"], "bar_close_time_ms": legs[-1]["bar_close_time_ms"]},
+        "events": events,
         "net_pnl_usd": net_pnl,
         "realized_r": net_pnl / verdict["risk_budget_usd"],
         "maker_leg_share": Decimal(sum(1 for item in legs if item["liquidity"] == "MAKER")) / len(legs),
