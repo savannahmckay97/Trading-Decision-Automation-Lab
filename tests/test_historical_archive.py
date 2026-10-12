@@ -13,6 +13,7 @@ from contextlib import redirect_stdout
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research" / "historical_archive"))
 import archive as hist_archive  # noqa: E402
+import posthoc as hist_posthoc  # noqa: E402
 import run as hist_run  # noqa: E402
 
 SYMBOL = "TAOUSDT"
@@ -191,6 +192,13 @@ class EmptySampleTest(unittest.TestCase):
         self.assertEqual(hist_run.move_stats([None, None]),
                          {"n": 0, "mean_pct": None, "median_pct": None, "unavailable_reason": "NO_FORWARD_MOVES"})
         self.assertEqual(hist_run.move_stats([1.0, 3.0]), {"n": 2, "mean_pct": 2.0, "median_pct": 2.0})
+
+    def test_posthoc_empty_population(self):
+        report, rows = hist_posthoc.compute([], [])
+        self.assertEqual(rows, [])
+        self.assertEqual(report["label"], "POST_HOC_DESCRIPTIVE_NOT_PREREGISTERED")
+        self.assertEqual(report["close_exit_r_16bar"]["ci95_day_bootstrap"], [None, None])
+        self.assertIsNone(report["round_trip_cost"]["all_long_eligible"]["mean_cost_r"])
 
 
 if __name__ == "__main__":
