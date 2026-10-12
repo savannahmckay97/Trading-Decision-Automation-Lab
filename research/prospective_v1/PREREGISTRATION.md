@@ -164,3 +164,9 @@ outputs suppressed:
 - **Everything is published**: every horizon, both stop rules, every
   decision and every journal line, including unfavourable or empty results.
   Deviations from this plan are listed in the results as deviations.
+- **Amendments before the look are allowed, on the record.** Until the one
+  analysis in §5 runs, any part of this plan may be changed if a reasoned
+  argument for the change comes up. Each amendment is its own commit to this
+  file. It states what changed, why, the date, and that no outcome had been
+  examined. The results list every amendment. Once the analysis has run,
+  changes are deviations, not amendments.
