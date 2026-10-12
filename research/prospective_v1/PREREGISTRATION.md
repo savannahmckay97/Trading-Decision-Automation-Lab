@@ -113,9 +113,13 @@ Blocked cycles count towards coverage only. Decisions without a reward reference
    run chronologically over the same decisions, with parameters as fixed there
    (0.5% risk; −2% daily or 3-loss breaker; one position; no leverage;
    close-below-invalidation and 0.5 ATR emergency stop). `MAKER_STAGGERED` is
-   reported first, `MARKET_BASELINE` alongside. Costs: Kraken taker 40 bps,
-   maker 25 bps per side, slippage 5 bps, spread from the recorded quote at
-   decision. **[OWNER]** Report ending equity, net R, maximum drawdown, entry
+   reported first, `MARKET_BASELINE` alongside. Costs: Kraken Pro spot
+   **Tier 4, taker 35 bps and maker 20 bps per side** (the owner's actual
+   tier), slippage 5 bps, spread from the recorded quote at decision. Source:
+   kraken.com/features/fee-schedule, read 2026-10-13; it replaced the older
+   schedule this draft first assumed. A sensitivity at Tier 1 (taker 80, maker
+   40 bps, the tier for an account without the owner's volume or assets) is
+   reported alongside and labelled as such. **[OWNER]** Report ending equity, net R, maximum drawdown, entry
    fill rate, cost share of risk, breaker trips and every journal line. The
    maker fill model is optimistic (no queue, partial fills or adverse
    selection), and fills are priced on Binance candles. So a positive ledger
