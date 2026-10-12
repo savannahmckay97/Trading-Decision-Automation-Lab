@@ -82,7 +82,7 @@ ledger computes outcomes too.
   overlapping candles, both segments' first gate-passing observations are
   compared on the canonical fields of §6, and every difference is reported.
   Differences in which cycles were blocked come from host timing and are listed,
-  not treated as mismatches. **[OWNER]**
+  not treated as mismatches. (Owner confirmed 2026-10-13.)
 - **Outcome prices:** Binance USD-M TAOUSDT completed 15m candles, taken from
   the recorded snapshots (each carries 150 candles, so gaps shorter than about
   37 h are filled by later snapshots that observed those candles). Execution
@@ -286,11 +286,18 @@ cases excluded; the sensitivities are reported beside it):
 
 ## 5. When the analysis runs
 
-**One analysis, no interim outcome looks.** **[OWNER]** It runs at the earlier of:
+**One analysis, no interim outcome looks.** It runs at the earlier of
+(owner decision 2026-10-13, raised from 110 cases and one year):
 
-- **110 cases in the targeted population** (§3: first gate-passing observation per
+- **200 cases in the targeted population** (§3: first gate-passing observation per
   candle, `LONG_ELIGIBLE`, `reward_reference.status == AVAILABLE`); or
-- **2027-10-11T00:00Z**, one year after the holdout start.
+- **2028-04-11T00:00Z**, eighteen months after the holdout start.
+
+Why it was raised: at the historical entry rate (39%, below), 110 cases would give
+about 43 entered trades, barely above the sparse floor of 30. 200 cases should
+give about 78 entered trades and take about 16 months at the historical rate of
+about 12.5 targeted cases a month, inside the 18-month deadline. The original
+rationale for 110 follows for the record.
 
 Why 110, for the current primary (design checks on PR #21's history, which is
 not holdout data): 39% of targeted cases were entered (141 of 362; most of the
@@ -390,3 +397,6 @@ No prospective outcome had been examined at any of these.
   fixed-block bootstrap; a gap-aware wick stop; ledger timing and follow-up
   requirements; a censoring sensitivity; §5 rationale restated; the history
   disclosure in §1; fees marked as dated assumptions.
+- Owner decisions (2026-10-13): stopping trigger raised to 200 targeted cases or
+  2028-04-11 (110 cases would have given about 43 entered trades, too close to the
+  sparse floor); the segment seam rule in §2 confirmed.
