@@ -5,11 +5,23 @@ Usage: python research/historical_archive/run.py ARCHIVE_DIR OUT_JSON
 Uses the production rule (replay_archive.py) and the harness's _first_touch and
 _first_touch_summary unchanged. Writes every per-decision label to OUT_JSON and prints
 the summary. Nothing here selects or tunes anything.
+
+Added after the registered run (review of PR #21, A1-A3); none of it changes OUT_JSON's
+bytes on the registered archive:
+- The archive must match the registered manifest fingerprint, and every file is re-hashed
+  against the manifest before loading (archive.py).
+- OUT_JSON and OUT_JSON.provenance.json are created exclusively: an existing file is an
+  error, never overwritten. The provenance file records the input fingerprint, the code
+  revision, the replay's skip/reset counts and coverage, and how to read the primary label.
+- Empty or insufficient samples give null estimates and an INCONCLUSIVE reading with a
+  reason instead of crashing.
 """
 import datetime as dt
 import json
 import math
+import platform
 import random
+import subprocess
 import sys
 from collections import defaultdict
 from decimal import Decimal
@@ -17,7 +29,7 @@ from pathlib import Path
 from statistics import median
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from archive import load_archive  # noqa: E402
+from archive import load_archive, sha256_file  # noqa: E402
 from replay_archive import replay  # noqa: E402
 
 from market_observer.evaluation import _first_touch, _first_touch_summary  # noqa: E402
@@ -29,6 +41,12 @@ HALF_SPLIT_MS = int(dt.datetime(2025, 7, 1, tzinfo=dt.timezone.utc).timestamp() 
 HORIZONS = (16, 4, 96)  # primary first
 PRIMARY_HORIZON, PRIMARY_RULE = 16, "close_stop"
 BOOTSTRAP_DRAWS, SEED = 10_000, 20261013
+# SHA-256 of fetch_manifest.json registered in PREREGISTRATION.md section 2.
+REGISTERED_MANIFEST_SHA256 = "bfc2ae4a9968c4872650877d8949e973327b7c8c1e91601ef1b78c55923da00c"
+# Added after the run (review A3): fewer UTC days than this gives no interval and an
+# INCONCLUSIVE reading, so one populated day can't produce a collapsed "significant" interval.
+# The registered primary has 288 days, so this never binds on it.
+MIN_BOOTSTRAP_DAYS = 10
 
 
 def utc_day(ms):
@@ -70,7 +88,12 @@ def close_exit_r(touch, decision, path):
 
 
 def bootstrap_mean_by_day(cases, draws=BOOTSTRAP_DRAWS, seed=SEED):
-    """95% percentile CI of mean R per decided case, resampling UTC days with replacement."""
+    """95% percentile CI of mean R per decided case, resampling UTC days with replacement.
+
+    Returns (None, None) when there are no cases.
+    """
+    if not cases:
+        return None, None
     by_day = defaultdict(list)
     for day, r in cases:
         by_day[day].append(float(r))
@@ -102,9 +125,65 @@ def summarise_r(values):
             "sum_r": sum(vals) if vals else None}
 
 
-def main(archive_dir, out_path):
-    a = load_archive(archive_dir)
+def primary_summary(cases, ratios):
+    """The registered primary block. cases: [(utc_day, R)] decided; ratios: their gross ratios."""
+    days = len({day for day, _ in cases})
+    out = {"horizon_bars": PRIMARY_HORIZON, "stop_rule": PRIMARY_RULE, "decided": len(cases), "decided_days": days}
+    if not cases:
+        reason = "NO_DECIDED_CASES"
+    elif days < MIN_BOOTSTRAP_DAYS:
+        reason = f"FEWER_THAN_{MIN_BOOTSTRAP_DAYS}_DECIDED_DAYS"
+    else:
+        reason = None
+    lo, hi = bootstrap_mean_by_day(cases) if reason is None else (None, None)
+    mean_r = sum(float(v) for _, v in cases) / len(cases) if cases else None
+    if reason is None:
+        reading = "GROSS_EDGE_IN_PAST" if lo > 0 else "EVIDENCE_AGAINST_RULE" if hi < 0 else "INCONCLUSIVE"
+    else:
+        reading = "INCONCLUSIVE"
+    targets = sum(1 for _, v in cases if v != -1)
+    out.update({
+        "mean_gross_r": mean_r, "ci95_day_bootstrap": [lo, hi], "reading": reading,
+        "target_first": targets, "target_first_fraction": targets / len(cases) if cases else None,
+        "target_first_wilson95": wilson(targets, len(cases)),
+        "breakeven_rate_at_mean_ratio": float(1 / (1 + sum(ratios) / len(ratios))) if ratios else None,
+        "median_ratio_of_decided": float(median(ratios)) if ratios else None,
+    })
+    if reason is not None:
+        out["reading_reason"] = reason  # only present when the estimate is unavailable
+    return out
+
+
+def move_stats(moves):
+    """Forward-move summary; nulls and a reason for an empty sample."""
+    m = [x for x in moves if x is not None]
+    if not m:
+        return {"n": 0, "mean_pct": None, "median_pct": None, "unavailable_reason": "NO_FORWARD_MOVES"}
+    return {"n": len(m), "mean_pct": sum(m) / len(m), "median_pct": median(m)}
+
+
+def git_revision():
+    root = Path(__file__).resolve().parents[2]
+    try:
+        head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+                                    capture_output=True, text=True, check=True).stdout.strip())
+    except (OSError, subprocess.CalledProcessError):
+        return {"head": None, "dirty": None}
+    return {"head": head, "dirty": dirty}
+
+
+def main(archive_dir, out_path, expected_manifest_sha256=REGISTERED_MANIFEST_SHA256):
+    out_path = Path(out_path)
+    prov_path = out_path.with_name(out_path.name + ".provenance.json")
+    for p in (out_path, prov_path):
+        if p.exists():
+            raise FileExistsError(f"{p} exists; results are never overwritten, choose a new path")
+    a = load_archive(archive_dir, expected_manifest_sha256)
     bars = a["bars"]
+    if not a["oi"]:
+        raise ValueError("archive has no open-interest points")
     counts, per_candle, decisions = replay(bars, a["oi"], a["taker"], a["oi"][0]["timestamp_ms"])
     pop = [d for d in decisions if WINDOW_START_MS <= d["close_time_ms"] < WINDOW_END_MS]
 
@@ -126,21 +205,9 @@ def main(archive_dir, out_path):
     prim = rows_by_h[PRIMARY_HORIZON]
     cases = [(utc_day(r["close_time_ms"]), realised_r(r["reward_first_touch"], PRIMARY_RULE)) for r in prim]
     cases = [(day, v) for day, v in cases if v is not None]
-    lo, hi = bootstrap_mean_by_day(cases)
-    mean_r = sum(float(v) for _, v in cases) / len(cases)
-    reading = "GROSS_EDGE_IN_PAST" if lo > 0 else "EVIDENCE_AGAINST_RULE" if hi < 0 else "INCONCLUSIVE"
-    targets = sum(1 for _, v in cases if v != -1)
     ratios = [Decimal(r["reward_first_touch"]["gross_opportunity_to_risk"]) for r in prim
               if realised_r(r["reward_first_touch"], PRIMARY_RULE) is not None]
-    report["primary"] = {
-        "horizon_bars": PRIMARY_HORIZON, "stop_rule": PRIMARY_RULE, "decided": len(cases),
-        "decided_days": len({day for day, _ in cases}),
-        "mean_gross_r": mean_r, "ci95_day_bootstrap": [lo, hi], "reading": reading,
-        "target_first": targets, "target_first_fraction": targets / len(cases),
-        "target_first_wilson95": wilson(targets, len(cases)),
-        "breakeven_rate_at_mean_ratio": float(1 / (1 + sum(ratios) / len(ratios))),
-        "median_ratio_of_decided": float(median(ratios)),
-    }
+    report["primary"] = primary_summary(cases, ratios)
 
     # Secondary: close-exit R and bar-1 sensitivity (primary horizon).
     ce = [close_exit_r(r["reward_first_touch"], r["_decision"], r["_path"]) for r in prim]
@@ -171,18 +238,52 @@ def main(archive_dir, out_path):
     def fwd(i, h=PRIMARY_HORIZON):
         p = path_after(bars, i, h)
         return float(100 * (p[-1]["close"] / bars[i]["close"] - 1)) if p else None
-    def move_stats(idxs):
-        m = [x for x in (fwd(i) for i in idxs) if x is not None]
-        return {"n": len(m), "mean_pct": sum(m) / len(m), "median_pct": median(m)}
     window_idx = [index[c[0]] for c in per_candle if WINDOW_START_MS <= c[0] < WINDOW_END_MS]
     report["baselines_16bar_forward_close_move"] = {
-        "TDAL_LONG_ELIGIBLE": move_stats([d["bar_index"] for d in pop]),
-        "SELECT_ALL": move_stats(window_idx),
-        "POSITIVE_PRIOR_RETURN": move_stats([i for i in window_idx if i > 0 and bars[i]["close"] > bars[i - 1]["close"]]),
+        "TDAL_LONG_ELIGIBLE": move_stats(fwd(d["bar_index"]) for d in pop),
+        "SELECT_ALL": move_stats(fwd(i) for i in window_idx),
+        "POSITIVE_PRIOR_RETURN": move_stats(
+            fwd(i) for i in window_idx if i > 0 and bars[i]["close"] > bars[i - 1]["close"]),
     }
 
     out_rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in prim]
-    Path(out_path).write_text(canonical_json({"report": report, "primary_rows": out_rows}) + "\n")
+    with open(out_path, "x") as f:
+        f.write(canonical_json({"report": report, "primary_rows": out_rows}) + "\n")
+    window_candles = [c for c in per_candle if WINDOW_START_MS <= c[0] < WINDOW_END_MS]
+    provenance = {
+        "result_file": out_path.name,
+        "result_sha256": sha256_file(out_path),
+        "input": {
+            "archive_dir": str(Path(archive_dir).resolve()),
+            "manifest_sha256": a["manifest_sha256"],
+            "registered_manifest_sha256": REGISTERED_MANIFEST_SHA256,
+            "manifest_matches_registered": a["manifest_sha256"] == REGISTERED_MANIFEST_SHA256,
+            "verified_ok_files": sum(1 for f in a["manifest"]["files"] if f["status"] == "OK"),
+            "missing_not_published_files": sum(
+                1 for f in a["manifest"]["files"] if f["status"] == "MISSING_NOT_PUBLISHED"),
+        },
+        "code": {"git": git_revision(), "python": platform.python_version()},
+        "configuration": {
+            "window_close_ms": [WINDOW_START_MS, WINDOW_END_MS], "horizons": list(HORIZONS),
+            "primary": [PRIMARY_HORIZON, PRIMARY_RULE], "bootstrap_draws": BOOTSTRAP_DRAWS, "seed": SEED,
+            "min_bootstrap_days": MIN_BOOTSTRAP_DAYS,
+        },
+        "coverage": {
+            "bars_15m": len(bars),
+            "first_bar_open_ms": bars[0]["open_time_ms"] if bars else None,
+            "last_bar_open_ms": bars[-1]["open_time_ms"] if bars else None,
+            "oi_points": len(a["oi"]), "taker_buckets_5m": len(a["taker"]),
+            "evaluated_candles_all": len(per_candle), "evaluated_candles_in_window": len(window_candles),
+            "long_eligible_all": len(decisions), "long_eligible_in_window": len(pop),
+        },
+        "replay_counts_all_candles": dict(sorted(counts.items())),
+        "interpretation": (
+            "primary.reading is the registered label. The primary is a conditional, descriptive "
+            "first-touch statistic over resolved cases with every close-rule loss scored -1R; it is "
+            "not full-population gross expectancy or an executable trading result. See RESULTS.md."),
+    }
+    with open(prov_path, "x") as f:
+        f.write(canonical_json(provenance) + "\n")
     print(json.dumps(json.loads(canonical_json(report)), indent=1))
 
 
