@@ -202,7 +202,7 @@ See [evaluation contract](docs/DECISION_EVALUATION.md) and [product investigatio
 
 ## Current verification boundary
 
-The integrated deterministic suite includes 207 tests covering live/replay guards,
+The integrated deterministic suite includes 243 tests covering live/replay guards,
 the per-decision risk contract, persisted JSONL/SQLite parity, historical ingestion,
 immutable datasets, legacy manifest compatibility, outcome/paper workflows and
 descriptive evaluation. GitHub Actions runs the suite plus specification validation
@@ -211,4 +211,4 @@ HTTP 451; issue #7 now has a successful read-only live provider check and exact
 derivative candle alignment (see [contract and live evidence](docs/DERIVATIVE_CANDLE_ALIGNMENT.md)). No credential is used
 and no order route exists.
 
-Next expand provider timing/identity validation and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A RiskGovernor becomes necessary when account-aware proposed trades are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.
+Next validate provider timing/identity and capture actual as-of observations; then test the narrow decision record and frozen rule against baselines. A paper-only RiskGovernor now sizes and blocks LONG_ELIGIBLE proposals against a simulated account (`python -m market_observer.governor`, see `docs/RISK_GOVERNOR.md`); governing anything beyond paper waits until proposals are a validated use case. Parameter optimization and live execution remain out of scope. The doctrine is a research map, not a commitment to implement every listed capability.

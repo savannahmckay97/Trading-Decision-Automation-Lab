@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — RiskGovernor profit exit
+
+- `MAKER_STAGGERED` execution (default): post-only entry, staggered maker take-profits at 1R/2R, taker trailing stop; `MARKET_BASELINE` retained. Maker fee must be supplied.
+- Nine new governor tests (210 total).
+
 ## Unreleased — issue #18, deferred review findings from the issue #12 PRs
 
 - Retry truncated HTTP bodies and bad status lines as transport failures.
@@ -24,6 +29,13 @@
 PR #5 review fixes: preserve supported manifest versions and source metadata through outcome/paper validation; reject future auxiliary rows, invalid quantity ranges, malformed candle intervals and mismatched provenance. Added downstream CLI and snapshot regressions.
 
 All versions belong only to the independent **Trading Decision Automation Lab** project.
+
+## Unreleased — paper-only RiskGovernor
+
+- Add `market_observer/governor.py`: owner-chosen paper parameters ($1,000 account, 0.5% risk per trade, 2% daily loss or 3-loss breaker, one position, no leverage, kill switch), every failed check reported, unknown costs block.
+- Protective stop separate from setup invalidation: exit on a completed close below invalidation, plus an emergency stop 0.5 breakout-ATR below it; size computed on the emergency-stop distance plus costs.
+- Governed paper replay CLI with an immutable, deterministic journal artifact. `execution_permission` is always `NONE`; no live path.
+- 13 tests. Exploratory backfill plumbing check: modelled costs averaged 50% of the risk budget at assumed taker fees. See `docs/RISK_GOVERNOR.md`.
 
 ## Unreleased — historical ingestion and persisted snapshot boundary
 

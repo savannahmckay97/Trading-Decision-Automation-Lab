@@ -1,3 +1,11 @@
+# Verification — paper-only RiskGovernor, 11 October 2026
+
+- Rebased onto main `76dbb5d`; 210/210 tests pass including 9 new maker-first execution tests (strict-through fills, touch-is-not-a-fill, stop beats target in a bar, no entry-bar targets, ratchet-only trail, missing maker fee fails closed).
+
+- **161/161 deterministic tests passed locally on Python 3.13 on top of `main` (`d25d0ce`)**; specification validation passed (21 rules, 49 raw/config fields, 18 derived fields).
+- 13 new tests in `tests/test_governor.py`: sizing on emergency-stop distance plus costs, the no-leverage notional cap, every failed check reported, the 2% daily-loss boundary, fail-closed risk contracts and unknown costs, close-rule and gap-through emergency exits, the 3-loss breaker resetting on the next UTC day, the single-position limit, censoring ending the simulation, and no performance or execution claim.
+- Real-data plumbing check (exploratory, not performance evidence): `research/governed_backfill/run.py` on the 29-day TAOUSDT backfill; see `docs/RISK_GOVERNOR.md`.
+
 # Verification — issue #12, shared gap reset
 
 - 160 deterministic tests pass; specification validation passes.
