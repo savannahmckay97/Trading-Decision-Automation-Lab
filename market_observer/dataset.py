@@ -20,21 +20,31 @@ class DatasetError(ValueError):
     """Raised when snapshots cannot form a trustworthy frozen dataset."""
 
 
-def build_dataset_artifact(
-    snapshots: Iterable[dict[str, Any]], *, source: str,
-    source_metadata: dict[str, Any] | None = None,
-    dataset_version: str = DATASET_VERSION,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Validate and fingerprint snapshots without sorting away chronology evidence."""
-    if dataset_version not in {DATASET_VERSION, "trading-decision-lab-dataset-0.1.0"}:
-        raise DatasetError("unsupported dataset version")
-    rows: list[dict[str, Any]] = []
-    previous_observed: int | None = None
-    previous_exchange: int | None = None
-    identities: set[tuple[str, str]] = set()
-    digest = hashlib.sha256()
+class DatasetBuilder:
+    """Incremental form of ``build_dataset_artifact``: the same validation, row
+    order, fingerprint and manifest, without holding every row in memory. Each
+    ``add`` returns the decoded row; ``line`` gives the exact JSONL line hashed."""
 
-    for index, snapshot in enumerate(snapshots):
+    def __init__(self, *, source: str, source_metadata: dict[str, Any] | None = None,
+                 dataset_version: str = DATASET_VERSION) -> None:
+        if dataset_version not in {DATASET_VERSION, "trading-decision-lab-dataset-0.1.0"}:
+            raise DatasetError("unsupported dataset version")
+        self.source = source
+        self.source_metadata = source_metadata
+        self.dataset_version = dataset_version
+        self.count = 0
+        self.first_observed: int | None = None
+        self.previous_observed: int | None = None
+        self.previous_exchange: int | None = None
+        self.identities: set[tuple[str, str]] = set()
+        self.digest = hashlib.sha256()
+
+    @staticmethod
+    def line(row: dict[str, Any]) -> str:
+        return canonical_json(row) + "\n"
+
+    def add(self, snapshot: Any) -> dict[str, Any]:
+        index = self.count
         try:
             snapshot = decode_snapshot(snapshot)
         except SnapshotError as exc:
@@ -55,54 +65,69 @@ def build_dataset_artifact(
             exchange_time = int(snapshot["exchange_time_ms"])
         except (TypeError, ValueError) as exc:
             raise DatasetError(f"snapshot {index}: invalid timestamp") from exc
-        if previous_observed is not None and observed_at < previous_observed:
+        if self.previous_observed is not None and observed_at < self.previous_observed:
             raise DatasetError(f"snapshot {index}: observed_at_ms moved backwards")
         if exchange_time > observed_at:
             raise DatasetError(
                 f"snapshot {index}: exchange_time_ms is after observed_at_ms"
             )
-        previous_observed = observed_at
-        if previous_exchange is not None and exchange_time < previous_exchange:
+        self.previous_observed = observed_at
+        if self.previous_exchange is not None and exchange_time < self.previous_exchange:
             raise DatasetError(f"snapshot {index}: exchange_time_ms moved backwards")
-        previous_exchange = exchange_time
-        identities.add(
+        self.previous_exchange = exchange_time
+        self.identities.add(
             (str(snapshot["research_symbol"]), str(snapshot["executable_pair"]))
         )
         row = dict(snapshot)
-        digest.update((canonical_json(row) + "\n").encode("utf-8"))
-        rows.append(row)
+        self.digest.update(self.line(row).encode("utf-8"))
+        if self.first_observed is None:
+            self.first_observed = observed_at
+        self.count += 1
+        return row
 
-    if not rows:
-        raise DatasetError("dataset must contain at least one snapshot")
-    if len(identities) != 1:
-        raise DatasetError(f"dataset mixes instrument identities: {sorted(identities)}")
+    def manifest(self) -> dict[str, Any]:
+        if not self.count:
+            raise DatasetError("dataset must contain at least one snapshot")
+        if len(self.identities) != 1:
+            raise DatasetError(f"dataset mixes instrument identities: {sorted(self.identities)}")
 
-    research_symbol, executable_pair = next(iter(identities))
-    baseline = {
-        "dataset_version": dataset_version,
-        "source": source,
-        "snapshot_count": len(rows),
-        "research_symbol": research_symbol,
-        "executable_pair": executable_pair,
-        "first_observed_at_ms": int(rows[0]["observed_at_ms"]),
-        "last_observed_at_ms": int(rows[-1]["observed_at_ms"]),
-        "jsonl_sha256": digest.hexdigest(),
-    }
-    if source_metadata is not None:
-        baseline["source_metadata"] = source_metadata
-    manifest = {
-        "schema_version": "historical_dataset_manifest/0.1",
-        "dataset_id": stable_id("historical_dataset", baseline),
-        **baseline,
-        "claims": {
-            "chronological_input": True,
-            "identity_consistent": True,
-            "outcome_labels_present": False,
-            "fill_simulation_present": False,
-            "performance_claim_available": False,
-        },
-    }
-    return rows, manifest
+        research_symbol, executable_pair = next(iter(self.identities))
+        baseline = {
+            "dataset_version": self.dataset_version,
+            "source": self.source,
+            "snapshot_count": self.count,
+            "research_symbol": research_symbol,
+            "executable_pair": executable_pair,
+            "first_observed_at_ms": int(self.first_observed),
+            "last_observed_at_ms": int(self.previous_observed),
+            "jsonl_sha256": self.digest.hexdigest(),
+        }
+        if self.source_metadata is not None:
+            baseline["source_metadata"] = self.source_metadata
+        return {
+            "schema_version": "historical_dataset_manifest/0.1",
+            "dataset_id": stable_id("historical_dataset", baseline),
+            **baseline,
+            "claims": {
+                "chronological_input": True,
+                "identity_consistent": True,
+                "outcome_labels_present": False,
+                "fill_simulation_present": False,
+                "performance_claim_available": False,
+            },
+        }
+
+
+def build_dataset_artifact(
+    snapshots: Iterable[dict[str, Any]], *, source: str,
+    source_metadata: dict[str, Any] | None = None,
+    dataset_version: str = DATASET_VERSION,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Validate and fingerprint snapshots without sorting away chronology evidence."""
+    builder = DatasetBuilder(source=source, source_metadata=source_metadata,
+                             dataset_version=dataset_version)
+    rows = [builder.add(snapshot) for snapshot in snapshots]
+    return rows, builder.manifest()
 
 
 def validate_dataset_manifest(
