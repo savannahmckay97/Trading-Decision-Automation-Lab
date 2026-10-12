@@ -55,16 +55,27 @@ The owner may add an earlier conversation that sets out the layers in more detai
    outcome exists. A revision creates a new version, effective only for candles closing
    after the revision time. Old versions keep their record and are never rescored with
    hindsight. Every hypothesis ever tried is listed, including discarded ones.
-3. **Guard against false discoveries.** A system that watches many patterns will find
-   some that "worked" by chance. Track how many hypotheses were tried; judge each on data
-   after its creation (walk-forward), require a minimum sample before promoting one, and
-   correct for the number tried. A promoted hypothesis is then preregistered and confirmed
-   prospectively, as in `research/prospective_v1/`.
-4. **Costs first.** Expected move and stop distance must make round-trip costs small
+3. **Walk-forward evaluation is the core method** (owner's choice). Step through the
+   archive month by month. At each step, only hypothesis versions that existed before that
+   month may make predictions for it, and they are scored on it; revisions made after
+   seeing a month apply from the next month on. Every month is then an out-of-sample test,
+   and the score of a hypothesis is the concatenation of its forward predictions only.
+4. **Guard against false discoveries.** A system that watches many patterns will find
+   some that "worked" by chance. Track how many hypotheses were tried, require a minimum
+   forward sample before promoting one, and (recommended) correct for the number tried,
+   for example with a deflated Sharpe ratio or a false-discovery-rate adjustment.
+5. **Cross-asset evidence counts one way only** (owner's rule). A hypothesis that also
+   holds on assets it wasn't designed on gains credibility. One that fails elsewhere is
+   **not** invalidated for its own asset; its claim is scoped to that asset ("works on
+   TAO", not "works in crypto"). An asset-specific hypothesis gets no support from other
+   assets, so it must earn promotion on its own asset's walk-forward record alone.
+6. **Live recording is the final judge.** A promoted hypothesis is preregistered and
+   confirmed prospectively, as in `research/prospective_v1/`.
+7. **Costs first.** Expected move and stop distance must make round-trip costs small
    (proposal: costs ≤ 0.25R at the owner's tier), or the answer is WAIT. Evaluate with
    realistic exits (close-exit R, wick stops), never a −1R floor.
-5. **Long and short**, plus WAIT. Observation only: no order route, no credentials.
-6. **Fail closed.** A missing or stale layer blocks or downgrades; it is never imputed.
+8. **Long and short**, plus WAIT. Observation only: no order route, no credentials.
+9. **Fail closed.** A missing or stale layer blocks or downgrades; it is never imputed.
 
 ## 4. Candidate layers (each emits evidence: supports, opposes, or unknown)
 
@@ -88,9 +99,10 @@ The owner may add an earlier conversation that sets out the layers in more detai
   That tells us one rule fails; it says nothing about which other patterns work, so the
   history stays usable for new rules provided nobody designs by studying TAO's past price
   action and tuning to fit it. Don't delete the v1 results: they are the audit trail.
-- **Lock a test period.** Design and tune on TAO up to 2025-09-30. Keep 2025-10-01 to
-  2026-09-30 locked: no new idea is scored on it during design. A finished, written-down
-  rule gets one run on it, then prospective confirmation on the recorder.
+- **Lock a final test period.** Walk forward through TAO up to 2025-09-30 while
+  designing. Keep 2025-10-01 to 2026-09-30 locked: no new idea is scored on it during
+  design. Finished, written-down hypotheses get one walk-forward run through it, then
+  prospective confirmation on the recorder.
 
 ## 6. Suggested sequence
 
