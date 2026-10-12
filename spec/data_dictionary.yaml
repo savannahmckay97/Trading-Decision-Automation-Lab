@@ -471,6 +471,8 @@ derived_fields:
   feature.top_long_position_share: {type: decimal, range: [0, 1], producer: T1_POSITIONING}
   feature.return_15m_pct: {type: decimal, unit: percent, producer: feature_engine}
   feature.spread_bps: {type: decimal, unit: basis_points, producer: feature_engine}
+  feature.cross_venue_divergence_bps: {type: decimal, unit: basis_points, producer: feature_engine}
+  feature.executable_ask_divergence_bps: {type: decimal, unit: basis_points, producer: T0_VENUE_CONFIRMATION}
   feature.price_oi_quadrant: {type: enum, producer: T2_PRICE_OI_QUADRANT}
   score.breakout_quality: {type: integer, range: [-5, 5], producer: T2_BREAKOUT_QUALITY}
 

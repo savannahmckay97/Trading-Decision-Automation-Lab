@@ -273,7 +273,8 @@ class DerivativeAlignmentTests(unittest.TestCase):
         for timestamp in (end, end + 300_000):
             row["taker_flow_5m"].append({"timestamp_ms": timestamp, "buy_volume": Decimal("1"), "sell_volume": Decimal("999")})
         for timestamp in (end + 300_000, end + 600_000):
-            row["open_interest_5m"].append({"timestamp_ms": timestamp, "open_interest": Decimal("999999")})
+            row["open_interest_5m"].append({"timestamp_ms": timestamp, "open_interest": Decimal("999999"),
+                                            "open_interest_value": Decimal("999999")})
         for endpoint, series in (("binance_taker", "taker_flow_5m"), ("binance_oi_history", "open_interest_5m")):
             row["provenance"][endpoint]["event_time_ms"] = row[series][-1]["timestamp_ms"]
         result = evaluate_snapshot(row, ObserverConfig(), None)

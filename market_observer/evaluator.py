@@ -17,6 +17,7 @@ from .engine import (
     gate_outcome,
 )
 from .features import FeatureError, calculate_features
+from .snapshots import decode_snapshot
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,10 @@ def evaluate_snapshot(
     """
 
     validate_snapshot_asof(snapshot)
+    # The same complete structural contract replay applies (snapshots.py), so live
+    # state can't be built from a snapshot that saved replay would reject. Live turns
+    # a violation into a fail-closed decision; replay of such data stops loudly.
+    decode_snapshot(snapshot, require_complete=True)
     resolved_features = features if features is not None else calculate_features(snapshot, config)
     close_time = int(resolved_features["completed_candle_close_time_ms"])
     gates = assess_gates(snapshot, resolved_features, config)

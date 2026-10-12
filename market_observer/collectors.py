@@ -128,8 +128,38 @@ class PublicCollectors:
         if critical and name in {"binance_klines", "binance_oi_history", "binance_taker"}:
             if not isinstance(payload, list) or not payload:
                 raise ValueError(f"{name}: required series must be a non-empty array")
+        mismatch = payload_identity_error(name, payload, symbol)
+        if mismatch:
+            raise ValueError(f"{name}: {mismatch}")
         received = now_ms()
         return RawEvent(source, name, symbol, _event_time(name, payload, received), received, payload, critical)
+
+
+def kraken_result_keys(pair: str) -> set[str]:
+    """Result keys Kraken may use for a requested fiat pair: the altname, or the legacy
+    X<base>Z<quote> form older assets use (XBTUSD -> XXBTZUSD, ETHUSD -> XETHZUSD).
+    Assumes a three-letter fiat quote, as the executable USD pair has."""
+    base, quote = pair[:-3], pair[-3:]
+    return {pair, f"X{base}Z{quote}"}
+
+
+def payload_identity_error(name: str, payload: Any, expected_symbol: str) -> str | None:
+    """Return why a provider payload names a different instrument, or None.
+
+    Checked wherever the provider states identity. Binance klines and the taker
+    ratio carry no symbol; their identity is bound to the request only.
+    """
+    if name == "kraken_ticker":
+        result = payload.get("result") if isinstance(payload, dict) else None
+        if not isinstance(result, dict) or len(result) != 1:
+            return f"expected exactly one Kraken result, got {sorted(result) if isinstance(result, dict) else result!r}"
+        (key,) = result
+        return None if key in kraken_result_keys(expected_symbol) else f"Kraken result {key!r} is not {expected_symbol}"
+    rows = payload if isinstance(payload, list) else [payload] if isinstance(payload, dict) else []
+    found = {row["symbol"] for row in rows if isinstance(row, dict) and "symbol" in row}
+    if found and found != {expected_symbol}:
+        return f"payload symbol {sorted(found)} is not {expected_symbol}"
+    return None
 
 
 def _event_time(name: str, payload: Any, fallback_ms: int) -> int | None:

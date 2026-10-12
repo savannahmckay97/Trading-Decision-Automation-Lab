@@ -142,36 +142,77 @@ class EventStore:
         return snapshot_id
 
     def append_decision(self, decision: dict[str, Any]) -> str:
-        decision_id = stable_id("decision", decision)
         with self.db:
-            self.db.execute(
-                "INSERT INTO decisions VALUES(?,?,?,?,?,?)",
-                (
-                    decision_id,
-                    int(decision["decision_time_ms"]),
-                    decision["research_symbol"],
-                    decision["setup"]["state"],
-                    decision["signal"],
-                    canonical_json(decision),
-                ),
-            )
+            return self._insert_decision(decision)
+
+    def commit_cycle(
+        self,
+        decision: dict[str, Any],
+        *,
+        state: dict[str, Any] | None = None,
+        strategy_id: str | None = None,
+        configuration_id: str | None = None,
+    ) -> str:
+        """Record a decision and, if given, its new setup state in one transaction.
+
+        A crash or write error can't leave a state transition without the decision
+        that made it, or the reverse.
+        """
+        with self.db:
+            if state is not None:
+                self._upsert_state(strategy_id, decision["research_symbol"], state, configuration_id)
+            return self._insert_decision(decision)
+
+    def _insert_decision(self, decision: dict[str, Any]) -> str:
+        decision_id = stable_id("decision", decision)
+        self.db.execute(
+            "INSERT INTO decisions VALUES(?,?,?,?,?,?)",
+            (
+                decision_id,
+                int(decision["decision_time_ms"]),
+                decision["research_symbol"],
+                decision["setup"]["state"],
+                decision["signal"],
+                canonical_json(decision),
+            ),
+        )
         return decision_id
 
-    def load_setup_state(self, strategy_id: str, research_symbol: str) -> dict[str, Any] | None:
+    def load_setup_state(
+        self, strategy_id: str, research_symbol: str, configuration_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """The saved setup state. With ``configuration_id``, a state saved under a
+        different (or unrecorded) configuration is not resumed: None is returned, so
+        a restart with changed parameters starts a fresh setup instead of carrying
+        an old one into a new rule contract."""
         row = self.db.execute(
             "SELECT payload_json FROM setup_states WHERE strategy_id=? AND research_symbol=?",
             (strategy_id, research_symbol),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        if not row:
+            return None
+        payload = json.loads(row[0])
+        wrapped = isinstance(payload, dict) and set(payload) == {"configuration_id", "state"}
+        if configuration_id is not None and (not wrapped or payload["configuration_id"] != configuration_id):
+            return None
+        return payload["state"] if wrapped else payload
 
-    def save_setup_state(self, strategy_id: str, research_symbol: str, state: dict[str, Any]) -> None:
+    def save_setup_state(
+        self, strategy_id: str, research_symbol: str, state: dict[str, Any], configuration_id: str | None = None
+    ) -> None:
         with self.db:
-            self.db.execute(
-                """INSERT INTO setup_states VALUES(?,?,?,?)
-                ON CONFLICT(strategy_id,research_symbol) DO UPDATE SET
-                updated_at_ms=excluded.updated_at_ms,payload_json=excluded.payload_json""",
-                (strategy_id, research_symbol, now_ms(), canonical_json(state)),
-            )
+            self._upsert_state(strategy_id, research_symbol, state, configuration_id)
+
+    def _upsert_state(
+        self, strategy_id: str, research_symbol: str, state: dict[str, Any], configuration_id: str | None
+    ) -> None:
+        payload = state if configuration_id is None else {"configuration_id": configuration_id, "state": state}
+        self.db.execute(
+            """INSERT INTO setup_states VALUES(?,?,?,?)
+            ON CONFLICT(strategy_id,research_symbol) DO UPDATE SET
+            updated_at_ms=excluded.updated_at_ms,payload_json=excluded.payload_json""",
+            (strategy_id, research_symbol, now_ms(), canonical_json(payload)),
+        )
 
     def heartbeat(self, status: str, detail: str | None = None) -> None:
         with self.db:

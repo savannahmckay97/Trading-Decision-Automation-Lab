@@ -82,6 +82,33 @@ def load_sqlite_snapshots(path: str | Path, research_symbol: str | None = None) 
         db.close()
 
 
+def bind_replay_to_snapshots(snapshots: list[dict[str, Any]], replay_result: dict[str, Any]) -> None:
+    """Raise ReplayError unless ``replay_result`` is exactly the replay of these snapshots.
+
+    Rebuilds the replay from the (already verified) snapshots with the configuration the
+    replay records, and requires the same configuration, replay ID and decision content.
+    A replay of another dataset, symbol or configuration, or with edited decisions, fails.
+    """
+    baseline = replay_result.get("baseline")
+    if not isinstance(baseline, dict) or not isinstance(baseline.get("configuration"), dict):
+        raise ReplayError("replay result has no recorded configuration")
+    recorded = dict(baseline["configuration"])
+    recorded.pop("research_symbol", None)
+    recorded.pop("executable_pair", None)
+    try:
+        config = ObserverConfig(**recorded)
+        config.validate()
+    except (TypeError, ValueError) as exc:
+        raise ReplayError(f"replay configuration is invalid: {exc}") from exc
+    if stable_id("config", config.public_dict()) != baseline.get("configuration_id"):
+        raise ReplayError("replay configuration does not match its configuration_id")
+    rebuilt = ReplayRunner(config).run(snapshots)
+    if rebuilt["replay_id"] != replay_result.get("replay_id"):
+        raise ReplayError("replay does not match the verified dataset")
+    if json.loads(canonical_json(rebuilt["decisions"])) != json.loads(canonical_json(replay_result.get("decisions"))):
+        raise ReplayError("replay decisions differ from a replay of the verified dataset")
+
+
 class ReplayRunner:
     """Replay snapshots without collectors, credentials, orders, or shared state."""
 
