@@ -69,3 +69,23 @@ redesign tested on data it wasn't designed on.
 No paper ledger (PR #11 was a draft at freeze). Kraken spread, divergence and
 freshness gates were assumed passed. Whether Kraken listed TAOUSD for the whole window
 was not checked.
+
+## Post-run note: the primary inherited known design flaws (added 2026-10-13, after the results)
+
+This plan copied its primary measure from PR #20. An independent review of PR #20
+(issue #22, posted 2026-10-12, before this plan froze but not consulted when freezing it)
+had already identified four flaws in that measure. All four are visible here:
+
+1. **Resolved cases only.** The mean excludes `NEITHER_WITHIN_HORIZON` (4 cases here,
+   so a small effect in this run, but the estimand is conditional).
+2. **Every close-rule loss scored −1R.** Actual breach-close exits average −1.97R
+   (close-exit R above).
+3. **Touches before the decision existed.** Bar 1 starts at the signal close; the
+   decision arrives about 4 minutes later. 221 of 358 cases resolve on bar 1.
+4. **Baseline not matched.** The selection baselines use forward close moves, not the
+   primary's first-touch payoff.
+
+So the primary's **GROSS_EDGE_IN_PAST** should be read only as a positive *conditional,
+descriptive first-touch statistic*, not as evidence of a gross trading edge. The
+conclusion above, no usable edge, rests on the secondaries and is unchanged. Future
+plans use the corrected estimand being written into PR #20.
