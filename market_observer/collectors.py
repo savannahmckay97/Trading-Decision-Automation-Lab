@@ -135,19 +135,31 @@ class PublicCollectors:
         return RawEvent(source, name, symbol, _event_time(name, payload, received), received, payload, critical)
 
 
+# Kraken's own asset codes for bases whose public ticker differs (BTC is XBT, DOGE is XDG).
+KRAKEN_ASSET_CODES = {"BTC": "XBT", "DOGE": "XDG"}
+# Binance endpoints whose responses always name the instrument. Klines and the taker
+# ratio carry no symbol, so their identity is bound to the request only.
+SYMBOL_REQUIRED = frozenset({
+    "binance_price", "binance_book", "binance_oi", "binance_oi_history", "binance_funding",
+    "binance_global_ratio", "binance_top_account_ratio", "binance_top_position_ratio",
+})
+
+
 def kraken_result_keys(pair: str) -> set[str]:
-    """Result keys Kraken may use for a requested fiat pair: the altname, or the legacy
-    X<base>Z<quote> form older assets use (XBTUSD -> XXBTZUSD, ETHUSD -> XETHZUSD).
-    Assumes a three-letter fiat quote, as the executable USD pair has."""
+    """Result keys Kraken may return for a requested fiat pair such as BTCUSD: the pair,
+    its Kraken-code altname (XBTUSD, XDGUSD) and the legacy X<code>Z<quote> form
+    (XXBTZUSD). Assumes a three-letter fiat quote, as the executable USD pair has."""
     base, quote = pair[:-3], pair[-3:]
-    return {pair, f"X{base}Z{quote}"}
+    code = KRAKEN_ASSET_CODES.get(base, base)
+    return {pair, f"{code}{quote}", f"X{code}Z{quote}"}
 
 
 def payload_identity_error(name: str, payload: Any, expected_symbol: str) -> str | None:
-    """Return why a provider payload names a different instrument, or None.
+    """Return why a provider payload doesn't identify the expected instrument, or None.
 
-    Checked wherever the provider states identity. Binance klines and the taker
-    ratio carry no symbol; their identity is bound to the request only.
+    Endpoints that always name their instrument must name the expected one on every
+    row; a missing symbol is a mismatch there. Klines and the taker ratio carry no
+    symbol and are bound to the request only.
     """
     if name == "kraken_ticker":
         result = payload.get("result") if isinstance(payload, dict) else None
@@ -155,10 +167,14 @@ def payload_identity_error(name: str, payload: Any, expected_symbol: str) -> str
             return f"expected exactly one Kraken result, got {sorted(result) if isinstance(result, dict) else result!r}"
         (key,) = result
         return None if key in kraken_result_keys(expected_symbol) else f"Kraken result {key!r} is not {expected_symbol}"
-    rows = payload if isinstance(payload, list) else [payload] if isinstance(payload, dict) else []
-    found = {row["symbol"] for row in rows if isinstance(row, dict) and "symbol" in row}
-    if found and found != {expected_symbol}:
-        return f"payload symbol {sorted(found)} is not {expected_symbol}"
+    if name not in SYMBOL_REQUIRED:
+        return None
+    if payload == []:
+        return None  # an empty series has nothing to misattribute; emptiness is handled elsewhere
+    rows = payload if isinstance(payload, list) else [payload]
+    symbols = [row.get("symbol") if isinstance(row, dict) else None for row in rows]
+    if any(symbol != expected_symbol for symbol in symbols):
+        return f"payload symbols {sorted(set(map(str, symbols)))} are not all {expected_symbol}"
     return None
 
 

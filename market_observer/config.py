@@ -76,6 +76,19 @@ class ObserverConfig:
             if not cost.is_finite() or cost < 0:
                 raise ValueError(f"{name} must be finite and non-negative")
 
+    # Settings that change how data is fetched or reported, not how the setup state
+    # machine evolves. Everything else is treated as a rule setting (fail-safe for new fields).
+    OPERATIONAL_FIELDS = frozenset({
+        "poll_seconds", "request_timeout_seconds", "request_attempts", "mode",
+        "fee_bps_per_side", "slippage_bps_per_side",
+        "reward_pivot_confirmation_bars", "reward_search_bars",
+    })
+
+    def state_rule_dict(self) -> dict:
+        """The settings saved setup state depends on; changing any of them must not
+        resume a setup formed under the old rules."""
+        return {key: value for key, value in self.public_dict().items() if key not in self.OPERATIONAL_FIELDS}
+
     def public_dict(self) -> dict:
         data = asdict(self)
         data.update(research_symbol=self.research_symbol, executable_pair=self.executable_pair)

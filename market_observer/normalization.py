@@ -84,7 +84,9 @@ def build_snapshot(
         "quality": {
             "critical_missing": sorted(set(critical_missing)),
             "collection_errors": [error.record() for error in errors],
-            **({"identity_mismatches": identity_mismatches} if identity_mismatches else {}),
+            **({"identity_mismatches": [{"endpoint": name, "detail": detail}
+                                        for name, detail in sorted(identity_mismatches.items())]}
+               if identity_mismatches else {}),
         },
     }
     return snapshot
