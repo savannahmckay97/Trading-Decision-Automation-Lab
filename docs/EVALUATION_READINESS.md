@@ -96,6 +96,9 @@ probably overstate frequency somewhat.
    - the stop rule reported as primary (close, matching the state machine);
    - the target-first vs breakeven comparison;
    - a holdout start date.
+
+   Drafted for owner review in `research/prospective_v1/PREREGISTRATION.md`
+   (holdout start 2026-10-11T06:08:13Z, the start of prospective recording).
 4. **Do not widen to more assets just to gain sample size** until the
    single-asset loop works (`PRODUCT_DIRECTION.md`). Pooling would speed
    evaluation, but it would mix regimes and venues.
